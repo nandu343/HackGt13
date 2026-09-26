@@ -1,0 +1,112 @@
+"""Realtime / presence / soft-lock / voice / drawing DTOs."""
+
+from __future__ import annotations
+
+from typing import Any, Literal
+
+from pydantic import Field
+
+from .base import CamelModel
+from .ops import SceneOperation
+from .scene import Scene
+
+
+class PresenceUser(CamelModel):
+    user_id: str
+    display_name: str
+    color: str | None = None
+    selected_object_id: str | None = None
+    last_seen_at: str | None = None
+    voice_enabled: bool | None = None
+    voice_speaking: bool | None = None
+
+
+class DrawingStroke(CamelModel):
+    stroke_id: str
+    scene_id: str
+    actor_id: str
+    color: str = '#6ec8e8'
+    width: float = 0.02
+    points: list[list[float]] = Field(min_length=2)
+    plane: Literal['wall', 'floor', 'free'] | None = None
+    created_at: str | None = None
+
+
+class SoftLockRequest(CamelModel):
+    object_id: str
+    actor_id: str
+    ttl_seconds: int | None = Field(default=None, ge=1, le=300)
+
+
+class SoftLockReleaseRequest(CamelModel):
+    object_id: str
+    actor_id: str
+
+
+class SoftLockResult(CamelModel):
+    ok: bool
+    scene_id: str
+    object_id: str
+    locked_by: str | None = None
+    locked_until: str | None = None
+    message: str | None = None
+    scene: Scene | None = None
+
+
+class WsClientMessage(CamelModel):
+    type: Literal[
+        'join',
+        'leave',
+        'presence',
+        'ping',
+        'lock',
+        'unlock',
+        'rtc_offer',
+        'rtc_answer',
+        'rtc_ice',
+        'draw_stroke',
+        'draw_clear',
+    ]
+    user: PresenceUser | None = None
+    object_id: str | None = None
+    actor_id: str | None = None
+    ttl_seconds: int | None = None
+    stroke: DrawingStroke | None = None
+    scope: Literal['own', 'all'] | None = None
+    from_user_id: str | None = None
+    to_user_id: str | None = None
+    sdp: dict[str, Any] | None = None
+    candidate: dict[str, Any] | None = None
+
+
+class WsServerMessage(CamelModel):
+    type: Literal[
+        'welcome',
+        'presence',
+        'scene',
+        'patch',
+        'lock',
+        'error',
+        'pong',
+        'rtc_offer',
+        'rtc_answer',
+        'rtc_ice',
+        'draw_stroke',
+        'draw_clear',
+        'draw_snapshot',
+    ]
+    scene_id: str | None = None
+    presence: list[PresenceUser] | None = None
+    scene: Scene | None = None
+    version: int | None = None
+    operations: list[SceneOperation] | None = None
+    payload: dict[str, Any] | None = None
+    message: str | None = None
+    strokes: list[DrawingStroke] | None = None
+    stroke: DrawingStroke | None = None
+    scope: Literal['own', 'all'] | None = None
+    actor_id: str | None = None
+    from_user_id: str | None = None
+    to_user_id: str | None = None
+    sdp: dict[str, Any] | None = None
+    candidate: dict[str, Any] | None = None

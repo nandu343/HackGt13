@@ -1,117 +1,190 @@
 'use client';
 
-import { Canvas } from '@react-three/fiber';
-import { OrbitControls } from '@react-three/drei';
-import { useMemo } from 'react';
+import { useEffect } from 'react';
+import { AiPanel } from '../components/AiPanel';
+import { BudgetPanel } from '../components/BudgetPanel';
+import { CatalogPanel } from '../components/CatalogPanel';
+import {
+  CollaborationBar,
+  ConnectionStatusPill
+} from '../components/ConnectionStatus';
+import { OnboardingStrip } from '../components/OnboardingStrip';
+import { SceneCanvas } from '../components/SceneCanvas';
+import { ToastStack } from '../components/ToastStack';
+import { SceneStoreProvider, useSceneStore } from '../lib/sceneStore';
 
-const room = {
-  width: 5.4,
-  length: 6.3,
-  height: 2.7
-};
+function Workspace() {
+  const {
+    scene,
+    connection,
+    selectedObjectId,
+    setSelectedObjectId,
+    applyLocalMove,
+    applyLocalRotate,
+    deleteSelected,
+    undo,
+    canUndo,
+    isBusy,
+    animating,
+    toasts,
+    dismissToast,
+    reload,
+    presence,
+    actorId,
+    voice,
+    drawMode,
+    strokes,
+    toggleVoice,
+    toggleMute,
+    setDrawMode,
+    addStroke,
+    clearOwnStrokes,
+    clearAllStrokes
+  } = useSceneStore();
 
-const objects = [
-  { id: 'sofa', type: 'sofa', position: [-1.3, 0.35, 1.6], color: '#d9c6a5', size: [2.2, 0.8, 0.9] },
-  { id: 'table', type: 'table', position: [1.5, 0.5, 0.1], color: '#b36b41', size: [1.4, 0.2, 1.1] },
-  { id: 'lamp', type: 'lamp', position: [-2.1, 0.9, -1.8], color: '#f8d66d', size: [0.4, 1.8, 0.4] },
-  { id: 'plant', type: 'plant', position: [2.2, 0.5, -2.2], color: '#4fa07d', size: [0.6, 1.1, 0.6] }
-];
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
 
-function RoomBox() {
-  return (
-    <group>
-      <mesh position={[0, -0.05, 0]} receiveShadow>
-        <boxGeometry args={[room.width, 0.1, room.length]} />
-        <meshStandardMaterial color="#dfe6d6" />
-      </mesh>
-      <mesh position={[0, room.height / 2, -room.length / 2]}>
-        <boxGeometry args={[room.width, room.height, 0.08]} />
-        <meshStandardMaterial color="#f4efe7" />
-      </mesh>
-      <mesh position={[0, room.height / 2, room.length / 2]}>
-        <boxGeometry args={[room.width, room.height, 0.08]} />
-        <meshStandardMaterial color="#f4efe7" />
-      </mesh>
-      <mesh position={[-room.width / 2, room.height / 2, 0]}>
-        <boxGeometry args={[0.08, room.height, room.length]} />
-        <meshStandardMaterial color="#f4efe7" />
-      </mesh>
-      <mesh position={[room.width / 2, room.height / 2, 0]}>
-        <boxGeometry args={[0.08, room.height, room.length]} />
-        <meshStandardMaterial color="#f4efe7" />
-      </mesh>
-    </group>
-  );
-}
-
-function SpatialObject({ object }: { object: (typeof objects)[number] }) {
-  return (
-    <group position={object.position as [number, number, number]}>
-      <mesh castShadow>
-        <boxGeometry args={object.size as [number, number, number]} />
-        <meshStandardMaterial color={object.color} />
-      </mesh>
-    </group>
-  );
-}
-
-export default function Page() {
-  const sceneObjects = useMemo(() => objects, []);
+      if (e.key === 'Escape') {
+        if (drawMode) {
+          setDrawMode(false);
+          return;
+        }
+        setSelectedObjectId(null);
+        return;
+      }
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        if (drawMode) return;
+        e.preventDefault();
+        void deleteSelected();
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        void undo();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [deleteSelected, undo, setSelectedObjectId, drawMode, setDrawMode]);
 
   return (
     <main className="page-shell">
+      <div className="atmosphere" aria-hidden />
       <section className="panel">
         <div className="header-row">
           <div>
             <p className="eyebrow">Spatial planning workspace</p>
             <h1>Shared Spatial AI</h1>
           </div>
-          <div className="status-pill">Live room sync</div>
+          <div className="header-actions">
+            <ConnectionStatusPill
+              status={connection}
+              version={scene?.version ?? null}
+              presenceCount={presence.length}
+            />
+            <button
+              type="button"
+              className="btn ghost compact"
+              onClick={() => void reload()}
+              disabled={isBusy}
+            >
+              Reload
+            </button>
+            <button
+              type="button"
+              className="btn ghost compact"
+              onClick={() => void undo()}
+              disabled={!canUndo || isBusy}
+            >
+              Undo
+            </button>
+          </div>
         </div>
 
+        <CollaborationBar
+          presence={presence}
+          actorId={actorId}
+          voice={voice}
+          drawMode={drawMode}
+          onToggleVoice={() => void toggleVoice()}
+          onToggleMute={toggleMute}
+          onToggleDraw={() => setDrawMode(!drawMode)}
+          onClearOwn={clearOwnStrokes}
+          onClearAll={clearAllStrokes}
+        />
+
+        <OnboardingStrip />
+
         <div className="content-grid">
-          <div className="scene-card">
-            <Canvas camera={{ position: [5.5, 4.2, 7.5], fov: 42 }}>
-              <ambientLight intensity={1.2} />
-              <directionalLight position={[4, 6, 2]} intensity={1.5} />
-              <RoomBox />
-              {sceneObjects.map((item) => (
-                <SpatialObject key={item.id} object={item} />
-              ))}
-              <OrbitControls enablePan enableZoom enableRotate />
-            </Canvas>
+          <div
+            className={`scene-card ${selectedObjectId ? 'has-selection' : ''} ${
+              drawMode ? 'is-drawing' : ''
+            }`}
+          >
+            {!scene && connection === 'connecting' && (
+              <div className="scene-overlay">Loading scene from API…</div>
+            )}
+            {!scene && connection === 'error' && (
+              <div className="scene-overlay error">
+                Could not reach API. Start the backend, then Reload.
+              </div>
+            )}
+            {scene && (
+              <SceneCanvas
+                bounds={scene.bounds}
+                objects={scene.objects}
+                selectedObjectId={selectedObjectId}
+                onSelect={setSelectedObjectId}
+                onMoveEnd={(id, pos) => void applyLocalMove(id, pos)}
+                onRotateEnd={(id, rot) => void applyLocalRotate(id, rot)}
+                disabled={isBusy || animating}
+                drawMode={drawMode}
+                strokes={strokes}
+                onStrokeComplete={(points, plane) => {
+                  addStroke({
+                    strokeId: `stroke_${Date.now().toString(36)}_${Math.random()
+                      .toString(36)
+                      .slice(2, 6)}`,
+                    color: '#e2b45c',
+                    width: 0.025,
+                    points,
+                    plane
+                  });
+                }}
+              />
+            )}
+            {scene && (
+              <div className="scene-footer">
+                <span>{scene.sceneId}</span>
+                <span>
+                  {scene.objects.length} objects
+                  {strokes.length ? ` · ${strokes.length} strokes` : ''}
+                  {selectedObjectId ? ` · selected ${selectedObjectId}` : ''}
+                  {drawMode ? ' · draw on back wall' : ''}
+                </span>
+              </div>
+            )}
           </div>
 
           <aside className="sidebar">
-            <div className="card">
-              <h2>AI prompt</h2>
-              <p>Turn this into a birthday party for 15 people under $150 with room for dancing.</p>
-            </div>
-
-            <div className="card">
-              <h2>Suggested layout</h2>
-              <ul>
-                <li>Dance floor cleared in center</li>
-                <li>Seating pushed to perimeter</li>
-                <li>Photo backdrop on west wall</li>
-                <li>Ambient lighting and decor accents</li>
-              </ul>
-            </div>
-
-            <div className="card">
-              <h2>Budget</h2>
-              <div className="budget-row">
-                <span>Current</span>
-                <strong>$218</strong>
-              </div>
-              <div className="budget-row target">
-                <span>Target</span>
-                <strong>$144</strong>
-              </div>
-            </div>
+            <AiPanel />
+            <BudgetPanel />
+            <CatalogPanel />
           </aside>
         </div>
       </section>
+      <ToastStack toasts={toasts} onDismiss={dismissToast} />
     </main>
+  );
+}
+
+export default function Page() {
+  return (
+    <SceneStoreProvider>
+      <Workspace />
+    </SceneStoreProvider>
   );
 }

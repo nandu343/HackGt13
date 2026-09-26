@@ -1,0 +1,92 @@
+from __future__ import annotations
+
+from typing import Literal
+
+from .base import CamelModel
+from .ops import SceneOperation
+from .scene import Dimensions
+
+
+class ConstraintSet(CamelModel):
+    budget: float | None = None
+    guest_count: int | None = None
+    must_have: list[str] | None = None
+    clear_center: bool | None = None
+
+
+class LayoutRequest(CamelModel):
+    scene_id: str
+    prompt: str
+    guest_count: int = 15
+    budget: float = 150.0
+    constraints: ConstraintSet | None = None
+
+
+class LayoutResponse(CamelModel):
+    scenario: str
+    reasoning_summary: str
+    operations: list[SceneOperation]
+    constraints: ConstraintSet
+    warnings: list[str] | None = None
+    planner_mode: Literal['rules', 'llm'] | None = None
+    fixed_ops: int | None = None
+
+
+class Product(CamelModel):
+    product_id: str
+    name: str
+    price: float
+    currency: str = 'USD'
+    dimensions: Dimensions | None = None
+    asset_id: str | None = None
+    tags: list[str] | None = None
+    purchasable: bool = True
+    virtual_only: bool = False
+
+
+class CatalogItem(Product):
+    category: str | None = None
+    thumbnail_url: str | None = None
+
+
+class CartLineItem(CamelModel):
+    product_id: str
+    name: str
+    quantity: int
+    unit_price: float
+    line_total: float
+    purchasable: bool = True
+    virtual_only: bool = False
+
+
+class CartSummary(CamelModel):
+    scene_id: str
+    currency: str
+    items: list[CartLineItem]
+    subtotal: float
+    purchasable_subtotal: float | None = None
+    virtual_only_count: int | None = None
+    budget: float | None = None
+    remaining: float | None = None
+
+
+class CartSummaryRequest(CamelModel):
+    scene_id: str
+    budget: float | None = None
+
+
+class CheckoutRequest(CamelModel):
+    scene_id: str
+    success_url: str | None = None
+    cancel_url: str | None = None
+    customer_email: str | None = None
+
+
+class CheckoutResponse(CamelModel):
+    mode: str
+    checkout_url: str
+    session_id: str
+    amount_total: float
+    currency: str
+    line_item_count: int
+    message: str | None = None
