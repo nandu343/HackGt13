@@ -25,6 +25,8 @@ class PresenceUser(CamelModel):
 
 
 class DrawingStroke(CamelModel):
+    """Arbitrary 3D polyline in Y-up meters (free-space AR sketch; wall/floor optional)."""
+
     stroke_id: str
     scene_id: str
     actor_id: str

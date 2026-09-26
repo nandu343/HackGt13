@@ -161,3 +161,11 @@ struct OperationsResultDTO: Codable, Sendable {
     var scene: SceneDTO
     var warnings: [String]?
 }
+
+struct SceneInviteDTO: Codable, Equatable, Sendable {
+    var token: String
+    var sceneId: String
+    var createdAt: String?
+    var createdBy: String?
+    var label: String?
+}

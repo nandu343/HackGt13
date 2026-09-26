@@ -16,10 +16,12 @@ import Foundation
 //   Offerer rule (match web): lexicographically smaller userId creates the offer.
 //   STUN: stun:stun.l.google.com:19302 (add TURN later for cellular NAT).
 //
-// Drawing — ephemeral strokes in Y-up meters (wall / floor / free polyline):
-//     { "type": "draw_stroke", "stroke": DrawingStrokeDTO }
+// Drawing — free-space 3D polylines in Y-up meters (anywhere in the AR room):
+//     { "type": "draw_stroke", "stroke": DrawingStrokeDTO }  // plane: "free" preferred
 //     { "type": "draw_clear", "actorId", "scope": "own"|"all" }
 //   welcome includes strokes[]; draw_clear echoes remaining strokes[].
+//   iOS: finger drag projects points along the camera ray (~1.2 m) — not wall-locked.
+//   Wired via SceneWebSocket → same channel as the web Camera AR / map twin.
 //
 // Ghost avatars — remotes from presence[] (skip local userId):
 //   For each peer with `position`, spawn a translucent capsule/sphere Entity
@@ -31,11 +33,11 @@ import Foundation
 //   the scene id / join the same WS channel with a friendly displayName.
 //
 // Existing furniture — RoomPlan marks scanned objects source="existing".
-//   Tap those entities in AR to MOVE_OBJECT / DELETE_OBJECT (clear out of the way);
+//   Tap those entities in live camera AR to MOVE_OBJECT / DELETE_OBJECT;
 //   walls stay immovable. Mirrors web ObjectGizmo + SelectionBar behavior.
 //
-// AR render hint: map each stroke.points → RealityKit Entity with MeshResource
-// generating a thin tube / LineMesh along world positions (same origin as scene graph).
+// Live AR: ARKit world-tracking ARView (camera passthrough) after RoomPlan scan.
+//   Catalog / AI objects = anchors; strokes = world-space polylines. Map twin is secondary.
 // Full AVAudioEngine / WebRTC iOS client is intentionally out of scope for this scaffold.
 
 struct PresenceUserDTO: Codable, Equatable, Sendable {

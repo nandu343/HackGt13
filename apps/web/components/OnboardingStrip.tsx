@@ -1,9 +1,9 @@
 'use client';
 
 const STEPS = [
-  'Load room',
+  'Enter Camera AR',
   'Invite friends',
-  'Plan together',
+  'Plan in AR',
   'Place & clear',
   'Shop'
 ];
@@ -21,7 +21,7 @@ export function OnboardingStrip({
         {STEPS.map((step, i) => (
           <li key={step}>
             <span className="step-num">{i + 1}</span>
-            {step === 'Plan together' && onPlan ? (
+            {step === 'Plan in AR' && onPlan ? (
               <button type="button" className="linkish" onClick={onPlan}>
                 {step}
               </button>
@@ -36,10 +36,10 @@ export function OnboardingStrip({
         ))}
       </ol>
       <p className="onboarding-hint">
-        Core flow: invite → plan with friends → accept AI → drag or clear furniture already in
-        the room. Advanced tools (timeline, disagreement, draw) live in the sidebar. Keys: click
-        select · <kbd>Delete</kbd> twice to remove · <kbd>Ctrl</kbd>+<kbd>Z</kbd> undo ·{' '}
-        <kbd>Esc</kbd> deselect.
+        Core flow: Camera AR over the real room → invite → plan with friends → accept AI → drag or
+        clear furniture. AR sketch draws in free 3D space. Map twin is secondary. Keys: click select
+        · <kbd>Delete</kbd> twice to remove · <kbd>Ctrl</kbd>+<kbd>Z</kbd> undo · <kbd>Esc</kbd>{' '}
+        deselect.
       </p>
     </div>
   );

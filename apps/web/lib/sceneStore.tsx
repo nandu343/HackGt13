@@ -173,7 +173,8 @@ type SceneStoreValue = {
     prompt?: string;
     guestCount?: number;
     budget?: number;
-  }) => Promise<void>;
+  }) => Promise<LayoutResponse | null>;
+  cancelLayoutRequest: () => void;
   acceptLayout: () => Promise<void>;
   rejectLayout: () => void;
   timeline: TimelineEntry[];
@@ -285,7 +286,9 @@ export function SceneStoreProvider({
     lookDirection: Vector3 | null;
   }>({ position: null, lookDirection: null });
   const intentAutoOpenedRef = useRef(false);
+  const intentOpenSentRef = useRef(false);
   const draftTimerRef = useRef<number | null>(null);
+  const layoutAbortRef = useRef<AbortController | null>(null);
 
   const actorColor = useMemo(() => colorFromId(actorId), [actorId]);
 
@@ -489,12 +492,21 @@ export function SceneStoreProvider({
     }
   }, [scene, connection, sceneId]);
 
-  // Broadcast intent_open once WS is up and modal is showing (first-time + re-open)
+  // Broadcast intent_open once when modal opens (or after reconnect) — not on syncing.
   useEffect(() => {
-    if (!intentModalOpen) return;
-    if (connection !== 'connected' && connection !== 'syncing') return;
+    if (!intentModalOpen) {
+      intentOpenSentRef.current = false;
+      return;
+    }
+    if (connection === 'disconnected' || connection === 'connecting') {
+      intentOpenSentRef.current = false;
+      return;
+    }
+    if (connection !== 'connected') return;
+    if (intentOpenSentRef.current) return;
     const sock = socketRef.current;
     if (!sock || sock.readyState !== WebSocket.OPEN) return;
+    intentOpenSentRef.current = true;
     sendIntentOpen(sock, {
       actorId: actorIdRef.current,
       displayName: displayNameRef.current,
@@ -953,17 +965,32 @@ export function SceneStoreProvider({
     );
   }, [selectedObjectId, scene, commitOps, pushToast]);
 
+  const cancelLayoutRequest = useCallback(() => {
+    layoutAbortRef.current?.abort();
+    layoutAbortRef.current = null;
+    setIsBusy(false);
+  }, []);
+
   const requestLayout = useCallback(
-    async (overrides?: { prompt?: string; guestCount?: number; budget?: number }) => {
-      if (!scene) return;
+    async (overrides?: {
+      prompt?: string;
+      guestCount?: number;
+      budget?: number;
+    }): Promise<LayoutResponse | null> => {
+      if (!scene) return null;
       const nextPrompt = overrides?.prompt ?? prompt;
       const nextGuests = overrides?.guestCount ?? guestCount;
       const nextBudget = overrides?.budget ?? targetBudget;
       if (overrides?.prompt != null) setPrompt(overrides.prompt);
       if (overrides?.guestCount != null) setGuestCount(overrides.guestCount);
       if (overrides?.budget != null) setTargetBudget(overrides.budget);
+
+      layoutAbortRef.current?.abort();
+      const controller = new AbortController();
+      layoutAbortRef.current = controller;
+
       setIsBusy(true);
-      setConnection('syncing');
+      // Keep WS connection status stable — do not flip to "syncing" (that re-fired intent_open).
       try {
         const payload: LayoutRequest = {
           sceneId: scene.sceneId,
@@ -971,14 +998,19 @@ export function SceneStoreProvider({
           guestCount: nextGuests,
           budget: nextBudget
         };
-        const layout = await postAiLayout(payload);
+        const layout = await postAiLayout(payload, { signal: controller.signal });
+        if (controller.signal.aborted) return null;
         setPendingLayout(layout);
-        setConnection('connected');
         pushToast(`AI ready: ${layout.scenario}`, 'success');
+        return layout;
       } catch (err) {
-        setConnection('error');
+        if (controller.signal.aborted) return null;
         pushToast(err instanceof Error ? err.message : 'AI layout failed', 'error');
+        return null;
       } finally {
+        if (layoutAbortRef.current === controller) {
+          layoutAbortRef.current = null;
+        }
         setIsBusy(false);
       }
     },
@@ -1460,6 +1492,7 @@ export function SceneStoreProvider({
     applyLocalRotate,
     deleteSelected,
     requestLayout,
+    cancelLayoutRequest,
     acceptLayout,
     rejectLayout,
     proposeDisagreement,

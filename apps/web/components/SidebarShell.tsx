@@ -18,7 +18,7 @@ const TOOLS: {
   opensDrawer: boolean;
 }[] = [
   { id: 'select', label: 'Select', icon: '◇', opensDrawer: false },
-  { id: 'draw', label: 'Draw', icon: '✎', opensDrawer: true },
+  { id: 'draw', label: 'Sketch', icon: '✎', opensDrawer: true },
   { id: 'plan', label: 'Plan', icon: '▦', opensDrawer: true },
   { id: 'shop', label: 'Shop', icon: '$', opensDrawer: true },
   { id: 'timeline', label: 'Timeline', icon: '⏱', opensDrawer: true },
@@ -27,7 +27,7 @@ const TOOLS: {
 ];
 
 const DRAWER_TITLES: Record<Exclude<HudToolId, 'select'>, string> = {
-  draw: 'Draw',
+  draw: 'AR sketch',
   plan: 'AI layout',
   shop: 'Shop',
   timeline: 'Timeline',

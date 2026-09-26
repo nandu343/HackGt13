@@ -69,6 +69,7 @@ export function IntentModal() {
     setTargetBudget,
     pendingLayout,
     requestLayout,
+    cancelLayoutRequest,
     acceptLayout,
     rejectLayout,
     isBusy,
@@ -126,12 +127,13 @@ export function IntentModal() {
 
   const onGenerate = async () => {
     setPrompt(composed);
-    await requestLayout({
+    setStep('preview');
+    const layout = await requestLayout({
       prompt: composed,
       guestCount,
       budget: targetBudget
     });
-    setStep('preview');
+    if (!layout) setStep('compose');
   };
 
   const onAccept = async () => {
@@ -183,7 +185,14 @@ export function IntentModal() {
                 : 'Pick a scenario, add notes, generate a layout.'}
             </p>
           </div>
-          <button type="button" className="btn ghost compact" onClick={onSkip} disabled={isBusy}>
+          <button
+            type="button"
+            className="btn ghost compact"
+            onClick={() => {
+              if (isBusy) cancelLayoutRequest();
+              onSkip();
+            }}
+          >
             Close
           </button>
         </header>
@@ -304,6 +313,15 @@ export function IntentModal() {
             </div>
 
             <div className="btn-row intent-actions">
+              {isBusy ? (
+                <button
+                  type="button"
+                  className="btn ghost"
+                  onClick={cancelLayoutRequest}
+                >
+                  Cancel
+                </button>
+              ) : null}
               <button
                 type="button"
                 className="btn primary"
@@ -318,7 +336,18 @@ export function IntentModal() {
 
         {step === 'preview' && (
           <div className="intent-preview">
-            {!pendingLayout && isBusy && <p className="ai-reasoning">Asking the hybrid planner…</p>}
+            {!pendingLayout && isBusy && (
+              <div className="intent-loading">
+                <p className="ai-reasoning">Asking the hybrid planner…</p>
+                <button
+                  type="button"
+                  className="btn ghost compact"
+                  onClick={cancelLayoutRequest}
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
             {pendingLayout && (
               <>
                 <p className="ai-scenario">

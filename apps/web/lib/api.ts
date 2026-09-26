@@ -46,6 +46,16 @@ export class ApiError extends Error {
   }
 }
 
+/** Client-side safety net for /ai/layout (server also times out LLM → rules). */
+export const AI_LAYOUT_TIMEOUT_MS = 15_000;
+
+function isAbortError(err: unknown): boolean {
+  return (
+    (err instanceof DOMException && err.name === 'AbortError') ||
+    (err instanceof Error && err.name === 'AbortError')
+  );
+}
+
 async function request<T>(
   path: string,
   init?: RequestInit,
@@ -61,6 +71,9 @@ async function request<T>(
       }
     });
   } catch (err) {
+    if (isAbortError(err)) {
+      throw new ApiError('Request aborted or timed out', 408, err);
+    }
     throw new ApiError(
       err instanceof Error ? err.message : 'Network error',
       0,
@@ -127,16 +140,46 @@ export async function fetchCatalog(): Promise<CatalogItem[]> {
   });
 }
 
-export async function postAiLayout(payload: LayoutRequest): Promise<LayoutResponse> {
+export async function postAiLayout(
+  payload: LayoutRequest,
+  options?: { signal?: AbortSignal; timeoutMs?: number }
+): Promise<LayoutResponse> {
   const body = LayoutRequestSchema.parse(payload);
-  return request(
-    '/ai/layout',
-    {
-      method: 'POST',
-      body: JSON.stringify(body)
-    },
-    (data) => LayoutResponseSchema.parse(data)
-  );
+  const timeoutMs = options?.timeoutMs ?? AI_LAYOUT_TIMEOUT_MS;
+  const controller = new AbortController();
+  const external = options?.signal;
+  const onExternalAbort = () => controller.abort();
+  if (external) {
+    if (external.aborted) controller.abort();
+    else external.addEventListener('abort', onExternalAbort, { once: true });
+  }
+  const timer =
+    timeoutMs > 0
+      ? setTimeout(() => controller.abort(), timeoutMs)
+      : undefined;
+  try {
+    return await request(
+      '/ai/layout',
+      {
+        method: 'POST',
+        body: JSON.stringify(body),
+        signal: controller.signal
+      },
+      (data) => LayoutResponseSchema.parse(data)
+    );
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 408) {
+      throw new ApiError(
+        'Layout timed out — try again (rules planner will still run on the server)',
+        408,
+        err.body
+      );
+    }
+    throw err;
+  } finally {
+    if (timer != null) clearTimeout(timer);
+    if (external) external.removeEventListener('abort', onExternalAbort);
+  }
 }
 
 export async function postCartSummary(

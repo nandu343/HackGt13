@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from typing import Any
 
 from ..models import CatalogItem, ConstraintSet, LayoutRequest, LayoutResponse, Scene, SceneOperation
@@ -15,6 +16,7 @@ logger = logging.getLogger(__name__)
 XAI_BASE_URL = 'https://api.x.ai/v1'
 # Default Grok chat model suitable for structured JSON (xAI docs)
 DEFAULT_XAI_MODEL = 'grok-4.6'
+DEFAULT_TIMEOUT_SECONDS = 8.0
 
 SYSTEM_PROMPT = """You are a spatial layout planner for a 3D room twin.
 Return ONLY valid JSON matching this schema (camelCase keys):
@@ -90,22 +92,22 @@ def _catalog_brief(catalog: dict[str, CatalogItem], limit: int = 24) -> list[dic
     ]
 
 
-def plan_with_llm(
+def _invoke_llm(
     scene: Scene,
     request: LayoutRequest,
     catalog: dict[str, CatalogItem],
     *,
     api_key: str,
     scenario: Scenario,
-) -> LayoutResponse | None:
-    """Call xAI Grok chat completions; return None on any failure so caller can fall back."""
-    try:
-        from openai import OpenAI
-    except ImportError:
-        logger.warning('openai package not installed; skipping LLM planner')
-        return None
+    timeout_seconds: float,
+) -> LayoutResponse:
+    from openai import OpenAI
 
-    client = OpenAI(api_key=api_key, base_url=XAI_BASE_URL)
+    client = OpenAI(
+        api_key=api_key,
+        base_url=XAI_BASE_URL,
+        timeout=timeout_seconds,
+    )
     user_payload = {
         'prompt': request.prompt,
         'guestCount': request.guest_count,
@@ -115,42 +117,77 @@ def plan_with_llm(
         'catalog': _catalog_brief(catalog),
     }
 
+    response = client.chat.completions.create(
+        model=DEFAULT_XAI_MODEL,
+        temperature=0.3,
+        response_format={'type': 'json_object'},
+        messages=[
+            {'role': 'system', 'content': SYSTEM_PROMPT},
+            {'role': 'user', 'content': json.dumps(user_payload)},
+        ],
+    )
+    content = response.choices[0].message.content or '{}'
+    data = json.loads(content)
+
+    ops_raw = data.get('operations') or data.get('Operations') or []
+    operations = [SceneOperation.model_validate(op) for op in ops_raw]
+    constraints_raw = data.get('constraints') or data.get('Constraints') or {}
+    constraints = ConstraintSet.model_validate(constraints_raw) if constraints_raw else ConstraintSet()
+    if constraints.budget is None:
+        constraints.budget = request.budget
+    if constraints.guest_count is None:
+        constraints.guest_count = request.guest_count
+    return LayoutResponse(
+        scenario=str(data.get('scenario') or scenario),
+        reasoning_summary=str(
+            data.get('reasoningSummary')
+            or data.get('reasoning_summary')
+            or f'LLM {scenario} layout for prompt.'
+        ),
+        operations=operations,
+        constraints=constraints,
+        warnings=data.get('warnings'),
+    )
+
+
+def plan_with_llm(
+    scene: Scene,
+    request: LayoutRequest,
+    catalog: dict[str, CatalogItem],
+    *,
+    api_key: str,
+    scenario: Scenario,
+    timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
+) -> LayoutResponse | None:
+    """Call xAI Grok chat completions; return None on any failure so caller can fall back."""
     try:
-        response = client.chat.completions.create(
-            model=DEFAULT_XAI_MODEL,
-            temperature=0.3,
-            response_format={'type': 'json_object'},
-            messages=[
-                {'role': 'system', 'content': SYSTEM_PROMPT},
-                {'role': 'user', 'content': json.dumps(user_payload)},
-            ],
+        from openai import OpenAI  # noqa: F401
+    except ImportError:
+        logger.warning('openai package not installed; skipping LLM planner')
+        return None
+
+    timeout = max(1.0, float(timeout_seconds or DEFAULT_TIMEOUT_SECONDS))
+    # Bound wall-clock time even if the HTTP client misbehaves.
+    # Important: do NOT use `with ThreadPoolExecutor` — its shutdown(wait=True)
+    # would block forever on a hung OpenAI call after FuturesTimeoutError.
+    wall = timeout + 1.0
+    pool = ThreadPoolExecutor(max_workers=1)
+    try:
+        future = pool.submit(
+            _invoke_llm,
+            scene,
+            request,
+            catalog,
+            api_key=api_key,
+            scenario=scenario,
+            timeout_seconds=timeout,
         )
-        content = response.choices[0].message.content or '{}'
-        data = json.loads(content)
+        return future.result(timeout=wall)
+    except FuturesTimeoutError:
+        logger.warning('LLM planner timed out after %.1fs; falling back to rules', wall)
+        return None
     except Exception as exc:
         logger.warning('LLM planner failed: %s', exc)
         return None
-
-    try:
-        ops_raw = data.get('operations') or data.get('Operations') or []
-        operations = [SceneOperation.model_validate(op) for op in ops_raw]
-        constraints_raw = data.get('constraints') or data.get('Constraints') or {}
-        constraints = ConstraintSet.model_validate(constraints_raw) if constraints_raw else ConstraintSet()
-        if constraints.budget is None:
-            constraints.budget = request.budget
-        if constraints.guest_count is None:
-            constraints.guest_count = request.guest_count
-        return LayoutResponse(
-            scenario=str(data.get('scenario') or scenario),
-            reasoning_summary=str(
-                data.get('reasoningSummary')
-                or data.get('reasoning_summary')
-                or f'LLM {scenario} layout for prompt.'
-            ),
-            operations=operations,
-            constraints=constraints,
-            warnings=data.get('warnings'),
-        )
-    except Exception as exc:
-        logger.warning('LLM response parse failed: %s', exc)
-        return None
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)

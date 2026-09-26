@@ -28,7 +28,7 @@ targets:
       path: SharedSpatialAI/Resources/Info.plist
       properties:
         UILaunchScreen: {}
-        NSCameraUsageDescription: Camera access is required for RoomPlan room scanning and AR overlay placement.
+        NSCameraUsageDescription: Camera access is required for RoomPlan scanning and live AR (virtual furniture and sketches overlaid on the real room).
         NSLocalNetworkUsageDescription: Local network access lets this app sync the shared scene with the FastAPI backend on your Mac.
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true

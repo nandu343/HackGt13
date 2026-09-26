@@ -110,7 +110,10 @@ Media is peer-to-peer; the hub only relays:
 
 Offerer = lexicographically smaller `userId`. Presence `voiceEnabled` / `voiceSpeaking` drive UI + mesh membership. Optional `position` / `lookDirection` place remote ghost avatars (web R3F; iOS stub).
 
-### Drawing strokes
+### Drawing strokes (free-space AR sketch)
+
+Arbitrary 3D polylines in Y-up meters (same origin as the scene graph). Prefer `"plane": "free"`;
+`wall` / `floor` remain optional hints only — strokes are never wall-locked by the API.
 
 ```json
 {
@@ -121,8 +124,8 @@ Offerer = lexicographically smaller `userId`. Presence `voiceEnabled` / `voiceSp
     "actorId": "web_abc",
     "color": "#e2b45c",
     "width": 0.025,
-    "points": [[0, 1.2, -2.5], [0.3, 1.4, -2.5]],
-    "plane": "wall"
+    "points": [[0.1, 1.2, -0.4], [0.3, 1.4, -0.1], [0.5, 1.35, 0.2]],
+    "plane": "free"
   }
 }
 { "type": "draw_clear", "actorId": "web_abc", "scope": "own" }

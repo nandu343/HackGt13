@@ -12,6 +12,7 @@ export function AiPanel() {
     setTargetBudget,
     pendingLayout,
     requestLayout,
+    cancelLayoutRequest,
     acceptLayout,
     rejectLayout,
     proposeDisagreement,
@@ -80,14 +81,21 @@ export function AiPanel() {
           />
         </label>
       </div>
-      <button
-        type="button"
-        className="btn primary"
-        onClick={() => void requestLayout()}
-        disabled={isBusy || !prompt.trim()}
-      >
-        {isBusy ? 'Thinking…' : 'Generate layout'}
-      </button>
+      <div className="btn-row">
+        <button
+          type="button"
+          className="btn primary"
+          onClick={() => void requestLayout()}
+          disabled={isBusy || !prompt.trim()}
+        >
+          {isBusy ? 'Thinking…' : 'Generate layout'}
+        </button>
+        {isBusy ? (
+          <button type="button" className="btn ghost" onClick={cancelLayoutRequest}>
+            Cancel
+          </button>
+        ) : null}
+      </div>
 
       {pendingLayout && (
         <div className="ai-result">

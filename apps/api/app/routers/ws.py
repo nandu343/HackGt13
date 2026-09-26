@@ -251,7 +251,7 @@ async def scene_websocket(websocket: WebSocket, scene_id: str) -> None:
                     )
                 continue
 
-            # --- Spatial whiteboard ---
+            # --- Free-space AR sketch (3D polylines; not wall-only) ---
             if msg_type == 'draw_stroke':
                 stroke_raw = data.get('stroke') or data
                 try:

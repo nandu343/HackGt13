@@ -3,6 +3,7 @@
 import { Suspense, useMemo, useRef, useState, type RefObject } from 'react';
 import { Canvas, type ThreeEvent, useFrame, useThree } from '@react-three/fiber';
 import { ContactShadows, Line, OrbitControls } from '@react-three/drei';
+import { XR, createXRStore } from '@react-three/xr';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 import * as THREE from 'three';
 import type {
@@ -12,8 +13,14 @@ import type {
   SceneObject,
   Vector3
 } from '@shared-spatial-ai/schema';
+import { isStructureObject } from '../lib/objectPolicy';
 import { GhostAvatars } from './GhostAvatars';
 import { ObjectGizmo } from './ObjectGizmo';
+
+/** `ar` = live camera + overlays only; `map` = digital twin room (no camera). */
+export type ViewMode = 'ar' | 'map';
+
+export const xrStore = createXRStore();
 
 /** Semi-transparent dual-tint layout ghosts (disagreement A/B). */
 function GhostLayoutObjects({
@@ -79,7 +86,6 @@ function PresencePoseBroadcaster({
     const now = performance.now();
     if (now - lastSent.current < 120) return;
 
-    // Ghost stands above the orbit focus (where the user is "looking at")
     ghostPos.current.set(
       controls.target.x,
       Math.max(0.55, controls.target.y + 0.55),
@@ -103,8 +109,11 @@ function PresencePoseBroadcaster({
   return null;
 }
 
+/** Map twin only — full synthetic room (walls / floor / slab). Never used in Camera AR. */
 function RoomShell({ bounds }: { bounds: RoomBounds }) {
   const { width, length, height } = bounds;
+  const wallOpacity = 0.92;
+  const sideOpacity = 0.75;
   return (
     <group>
       <mesh position={[0, -0.04, 0]} receiveShadow rotation={[-Math.PI / 2, 0, 0]}>
@@ -117,15 +126,30 @@ function RoomShell({ bounds }: { bounds: RoomBounds }) {
       </mesh>
       <mesh position={[0, height / 2, -length / 2]} receiveShadow>
         <boxGeometry args={[width, height, 0.06]} />
-        <meshStandardMaterial color="#f3eee6" roughness={0.85} transparent opacity={0.92} />
+        <meshStandardMaterial
+          color="#f3eee6"
+          roughness={0.85}
+          transparent
+          opacity={wallOpacity}
+        />
       </mesh>
       <mesh position={[-width / 2, height / 2, 0]} receiveShadow>
         <boxGeometry args={[0.06, height, length]} />
-        <meshStandardMaterial color="#efe9e0" roughness={0.85} transparent opacity={0.75} />
+        <meshStandardMaterial
+          color="#efe9e0"
+          roughness={0.85}
+          transparent
+          opacity={sideOpacity}
+        />
       </mesh>
       <mesh position={[width / 2, height / 2, 0]} receiveShadow>
         <boxGeometry args={[0.06, height, length]} />
-        <meshStandardMaterial color="#efe9e0" roughness={0.85} transparent opacity={0.75} />
+        <meshStandardMaterial
+          color="#efe9e0"
+          roughness={0.85}
+          transparent
+          opacity={sideOpacity}
+        />
       </mesh>
     </group>
   );
@@ -147,8 +171,11 @@ function StrokeLines({ strokes }: { strokes: DrawingStroke[] }) {
   );
 }
 
-/** Invisible back-wall plane for pointer drawing (Y-up meters). */
-function DrawSurface({
+/**
+ * Free-space drawing layer: place points along the pointer ray in world coords.
+ * Prefers mesh hits; otherwise samples a point a fixed depth in front of the camera.
+ */
+function DrawingLayer({
   bounds,
   active,
   color,
@@ -157,30 +184,62 @@ function DrawSurface({
   bounds: RoomBounds;
   active: boolean;
   color: string;
-  onStrokeComplete: (points: Vector3[], plane: 'wall') => void;
+  onStrokeComplete: (points: Vector3[], plane: 'free') => void;
 }) {
-  const { width, length, height } = bounds;
   const drawing = useRef(false);
   const points = useRef<Vector3[]>([]);
   const [preview, setPreview] = useState<Vector3[]>([]);
-  const { gl } = useThree();
+  const { camera, gl, raycaster, pointer } = useThree();
+  const hitMeshes = useRef<THREE.Object3D[]>([]);
 
-  const hitPoint = (e: ThreeEvent<PointerEvent>): Vector3 | null => {
-    if (!e.point) return null;
-    // Snap slightly in front of the wall to avoid z-fighting
-    return [e.point.x, e.point.y, -length / 2 + 0.04];
+  const sampleWorldPoint = (e?: ThreeEvent<PointerEvent>): Vector3 | null => {
+    if (e?.point) {
+      return [e.point.x, e.point.y, e.point.z];
+    }
+    raycaster.setFromCamera(pointer, camera);
+    const hits = raycaster.intersectObjects(hitMeshes.current, true);
+    if (hits[0]) {
+      const p = hits[0].point;
+      return [p.x, p.y, p.z];
+    }
+    // Free space: fixed depth along ray (~1.4 m) — mid-air sketch.
+    const dir = raycaster.ray.direction.clone().normalize();
+    const origin = raycaster.ray.origin;
+    const depth = 1.4;
+    const p = origin.clone().addScaledVector(dir, depth);
+    const hw = bounds.width / 2 + 0.5;
+    const hl = bounds.length / 2 + 0.5;
+    const x = Math.max(-hw, Math.min(hw, p.x));
+    const y = Math.max(0.15, Math.min(bounds.height + 0.4, p.y));
+    const z = Math.max(-hl, Math.min(hl, p.z));
+    return [x, y, z];
   };
 
   if (!active) return null;
 
+  const finish = () => {
+    gl.domElement.style.cursor = '';
+    if (!drawing.current) return;
+    drawing.current = false;
+    const pts = points.current;
+    points.current = [];
+    setPreview([]);
+    if (pts.length >= 2) onStrokeComplete(pts, 'free');
+  };
+
   return (
     <group>
+      {/* Invisible volume catcher for ray hits */}
       <mesh
-        position={[0, height / 2, -length / 2 + 0.03]}
+        position={[0, bounds.height / 2, 0]}
+        visible={false}
+        ref={(obj) => {
+          if (obj) hitMeshes.current = [obj];
+        }}
         onPointerDown={(e) => {
           e.stopPropagation();
           gl.domElement.style.cursor = 'crosshair';
-          const p = hitPoint(e);
+          const p = sampleWorldPoint(e);
           if (!p) return;
           drawing.current = true;
           points.current = [p];
@@ -189,40 +248,61 @@ function DrawSurface({
         onPointerMove={(e) => {
           if (!drawing.current) return;
           e.stopPropagation();
-          const p = hitPoint(e);
+          const p = sampleWorldPoint(e);
           if (!p) return;
           const last = points.current[points.current.length - 1];
           const dx = p[0] - last[0];
           const dy = p[1] - last[1];
-          if (dx * dx + dy * dy < 0.0004) return;
+          const dz = p[2] - last[2];
+          if (dx * dx + dy * dy + dz * dz < 0.0004) return;
           points.current = [...points.current, p];
           setPreview([...points.current]);
         }}
         onPointerUp={(e) => {
           e.stopPropagation();
-          gl.domElement.style.cursor = '';
-          if (!drawing.current) return;
-          drawing.current = false;
-          const pts = points.current;
-          points.current = [];
-          setPreview([]);
-          if (pts.length >= 2) onStrokeComplete(pts, 'wall');
+          finish();
         }}
-        onPointerLeave={() => {
+        onPointerLeave={() => finish()}
+      >
+        <boxGeometry args={[bounds.width * 1.4, bounds.height * 1.4, bounds.length * 1.4]} />
+        <meshBasicMaterial transparent opacity={0} side={THREE.DoubleSide} />
+      </mesh>
+      {/* Mid-air draw surface — fully invisible so it never paints over the camera */}
+      <mesh
+        position={[0, 1.2, 0]}
+        onPointerDown={(e) => {
+          e.stopPropagation();
+          gl.domElement.style.cursor = 'crosshair';
+          const p = sampleWorldPoint(e);
+          if (!p) return;
+          drawing.current = true;
+          points.current = [p];
+          setPreview([p]);
+        }}
+        onPointerMove={(e) => {
           if (!drawing.current) return;
-          drawing.current = false;
-          const pts = points.current;
-          points.current = [];
-          setPreview([]);
-          if (pts.length >= 2) onStrokeComplete(pts, 'wall');
+          e.stopPropagation();
+          const p = sampleWorldPoint(e);
+          if (!p) return;
+          const last = points.current[points.current.length - 1];
+          const dx = p[0] - last[0];
+          const dy = p[1] - last[1];
+          const dz = p[2] - last[2];
+          if (dx * dx + dy * dy + dz * dz < 0.0004) return;
+          points.current = [...points.current, p];
+          setPreview([...points.current]);
+        }}
+        onPointerUp={(e) => {
+          e.stopPropagation();
+          finish();
         }}
       >
-        <planeGeometry args={[width * 0.98, height * 0.95]} />
+        <planeGeometry args={[bounds.width * 2, bounds.height * 2]} />
         <meshBasicMaterial
-          color="#6ec8e8"
           transparent
-          opacity={0.08}
+          opacity={0}
           side={THREE.DoubleSide}
+          depthWrite={false}
         />
       </mesh>
       {preview.length >= 2 && (
@@ -247,13 +327,15 @@ type Props = {
   drawMode?: boolean;
   strokes?: DrawingStroke[];
   drawColor?: string;
-  onStrokeComplete?: (points: Vector3[], plane: 'wall') => void;
+  onStrokeComplete?: (points: Vector3[], plane: 'free' | 'wall' | 'floor') => void;
   presence?: PresenceUser[];
   localUserId?: string;
   onPresencePose?: (position: Vector3, lookDirection: Vector3) => void;
   ghostObjectsA?: SceneObject[];
   ghostObjectsB?: SceneObject[];
   ghostMode?: 'overlay' | 'side';
+  /** ar = camera + overlays; map = digital twin dollhouse. Mutually exclusive. */
+  viewMode?: ViewMode;
 };
 
 export function SceneCanvas({
@@ -273,104 +355,144 @@ export function SceneCanvas({
   onPresencePose,
   ghostObjectsA = [],
   ghostObjectsB = [],
-  ghostMode = 'overlay'
+  ghostMode = 'overlay',
+  viewMode = 'ar'
 }: Props) {
   const [dragging, setDragging] = useState(false);
   const strokeList = useMemo(() => strokes, [strokes]);
   const controlsRef = useRef<OrbitControlsImpl | null>(null);
   const sideOffset = ghostMode === 'side' ? Math.max(bounds.width * 0.55, 2.2) : 0;
+  const arMode = viewMode === 'ar';
+  const mapMode = viewMode === 'map';
+  const bg = '#cfe8f4';
+  // AR: eye-height looking into the room; Map: elevated dollhouse orbit.
+  const camPos: [number, number, number] = arMode
+    ? [0, 1.55, Math.max(bounds.length * 0.35, 1.6)]
+    : [5.8, 4.4, 7.8];
+  const overlayObjects = useMemo(
+    () => (arMode ? objects.filter((o) => !isStructureObject(o)) : objects),
+    [arMode, objects]
+  );
 
   return (
-    <div className={`scene-canvas ${drawMode ? 'draw-mode' : ''}`}>
+    <div
+      className={`scene-canvas ${drawMode ? 'draw-mode' : ''} ${
+        arMode ? 'ar-mode' : 'map-mode'
+      }`}
+    >
       <Canvas
-        shadows
-        camera={{ position: [5.8, 4.4, 7.8], fov: 40, near: 0.1, far: 80 }}
+        shadows={mapMode}
+        gl={{ alpha: arMode, antialias: true, premultipliedAlpha: false }}
+        camera={{ position: camPos, fov: arMode ? 70 : 40, near: 0.05, far: 80 }}
         onPointerMissed={() => {
           if (!dragging && !drawMode) onSelect(null);
         }}
+        style={arMode ? { background: 'transparent' } : undefined}
       >
-        <color attach="background" args={['#cfe8f4']} />
-        <fog attach="fog" args={['#cfe8f4', 14, 32]} />
-        <ambientLight intensity={0.55} />
-        <directionalLight
-          castShadow
-          position={[5.5, 9, 3.5]}
-          intensity={1.35}
-          shadow-mapSize-width={2048}
-          shadow-mapSize-height={2048}
-          shadow-camera-far={40}
-          shadow-camera-left={-8}
-          shadow-camera-right={8}
-          shadow-camera-top={8}
-          shadow-camera-bottom={-8}
-        />
-        <hemisphereLight args={['#e8f4ff', '#9aaf8c', 0.45]} />
-        <Suspense fallback={null}>
-          <RoomShell bounds={bounds} />
-          <StrokeLines strokes={strokeList} />
-          {drawMode && onStrokeComplete && (
-            <DrawSurface
-              bounds={bounds}
-              active={drawMode}
-              color={drawColor}
-              onStrokeComplete={onStrokeComplete}
-            />
+        <XR store={xrStore}>
+          {mapMode ? <color attach="background" args={[bg]} /> : null}
+          {mapMode ? <fog attach="fog" args={[bg, 14, 32]} /> : null}
+          {arMode ? (
+            <>
+              <ambientLight intensity={1.05} />
+              <directionalLight position={[2, 4, 2]} intensity={0.55} />
+            </>
+          ) : (
+            <>
+              <ambientLight intensity={0.55} />
+              <directionalLight
+                castShadow
+                position={[5.5, 9, 3.5]}
+                intensity={1.35}
+                shadow-mapSize-width={2048}
+                shadow-mapSize-height={2048}
+                shadow-camera-far={40}
+                shadow-camera-left={-8}
+                shadow-camera-right={8}
+                shadow-camera-top={8}
+                shadow-camera-bottom={-8}
+              />
+              <hemisphereLight args={['#dceaf5', '#8a9e7a', 0.45]} />
+            </>
           )}
-          {objects.map((obj) => (
-            <ObjectGizmo
-              key={obj.id}
-              object={obj}
-              selected={!drawMode && selectedObjectId === obj.id}
-              onSelect={(id) => {
-                if (!drawMode) onSelect(id);
-              }}
-              onMoveEnd={onMoveEnd}
-              onRotateEnd={onRotateEnd}
-              setDragging={setDragging}
-              disabled={disabled || drawMode}
-            />
-          ))}
-          {ghostObjectsA.length > 0 && (
-            <GhostLayoutObjects
-              objects={ghostObjectsA}
-              tint="#3db8e8"
-              offsetX={-sideOffset}
-            />
-          )}
-          {ghostObjectsB.length > 0 && (
-            <GhostLayoutObjects
-              objects={ghostObjectsB}
-              tint="#e8a03d"
-              offsetX={sideOffset}
-            />
-          )}
-          {localUserId && (
-            <GhostAvatars presence={presence} localUserId={localUserId} />
-          )}
-          <ContactShadows
-            position={[0, 0.01, 0]}
-            opacity={0.35}
-            scale={Math.max(bounds.width, bounds.length) * 1.4}
-            blur={2.4}
-            far={6}
+          <Suspense fallback={null}>
+            {mapMode ? <RoomShell bounds={bounds} /> : null}
+            <StrokeLines strokes={strokeList} />
+            {drawMode && onStrokeComplete && (
+              <DrawingLayer
+                bounds={bounds}
+                active={drawMode}
+                color={drawColor}
+                onStrokeComplete={onStrokeComplete}
+              />
+            )}
+            {overlayObjects.map((obj) => (
+              <ObjectGizmo
+                key={obj.id}
+                object={obj}
+                selected={!drawMode && selectedObjectId === obj.id}
+                onSelect={(id) => {
+                  if (!drawMode) onSelect(id);
+                }}
+                onMoveEnd={onMoveEnd}
+                onRotateEnd={onRotateEnd}
+                setDragging={setDragging}
+                disabled={disabled || drawMode}
+                arOverlay={arMode}
+              />
+            ))}
+            {ghostObjectsA.length > 0 && (
+              <GhostLayoutObjects
+                objects={ghostObjectsA}
+                tint="#3db8e8"
+                offsetX={-sideOffset}
+              />
+            )}
+            {ghostObjectsB.length > 0 && (
+              <GhostLayoutObjects
+                objects={ghostObjectsB}
+                tint="#e8a03d"
+                offsetX={sideOffset}
+              />
+            )}
+            {localUserId && (
+              <GhostAvatars presence={presence} localUserId={localUserId} />
+            )}
+            {mapMode ? (
+              <ContactShadows
+                position={[0, 0.01, 0]}
+                opacity={0.35}
+                scale={Math.max(bounds.width, bounds.length) * 1.4}
+                blur={2.4}
+                far={6}
+              />
+            ) : null}
+          </Suspense>
+          <PresencePoseBroadcaster
+            controlsRef={controlsRef}
+            onPose={onPresencePose}
           />
-        </Suspense>
-        <PresencePoseBroadcaster
-          controlsRef={controlsRef}
-          onPose={onPresencePose}
-        />
-        <OrbitControls
-          ref={controlsRef}
-          makeDefault
-          enabled={!dragging && !drawMode}
-          enablePan
-          enableZoom
-          enableRotate
-          maxPolarAngle={Math.PI / 2.05}
-          minDistance={3}
-          maxDistance={18}
-        />
+          <OrbitControls
+            ref={controlsRef}
+            makeDefault
+            enabled={!dragging && !drawMode}
+            enablePan={mapMode}
+            enableZoom={mapMode || !drawMode}
+            enableRotate
+            // AR: light peek around overlays — not a free dollhouse flyaround.
+            maxPolarAngle={arMode ? Math.PI / 2.05 : Math.PI / 2.05}
+            minPolarAngle={arMode ? Math.PI / 2.35 : 0}
+            minAzimuthAngle={arMode ? -Math.PI / 3 : undefined}
+            maxAzimuthAngle={arMode ? Math.PI / 3 : undefined}
+            minDistance={arMode ? 1.2 : 3}
+            maxDistance={arMode ? 4.5 : 18}
+            rotateSpeed={arMode ? 0.45 : 1}
+            zoomSpeed={arMode ? 0.55 : 1}
+            target={arMode ? [0, 1.15, 0] : [0, 0, 0]}
+          />
+        </XR>
       </Canvas>
+      {arMode ? <div className="ar-reticle" aria-hidden /> : null}
     </div>
   );
 }

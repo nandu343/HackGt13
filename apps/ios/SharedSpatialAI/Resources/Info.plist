@@ -23,7 +23,7 @@
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSCameraUsageDescription</key>
-	<string>Camera access is required for RoomPlan room scanning and AR overlay placement.</string>
+	<string>Camera access is required for RoomPlan scanning and live AR (virtual furniture and sketches overlaid on the real room).</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Local network access lets this app sync the shared scene with the FastAPI backend on your Mac.</string>
 	<key>NSBonjourServices</key>

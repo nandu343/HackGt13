@@ -15,6 +15,8 @@ type Props = {
   onRotateEnd: (id: string, rotation: [number, number, number, number]) => void;
   setDragging: (v: boolean) => void;
   disabled?: boolean;
+  /** Camera AR: slightly translucent floating proxy over the live feed. */
+  arOverlay?: boolean;
 };
 
 const TYPE_COLORS: Record<string, string> = {
@@ -54,7 +56,8 @@ export function ObjectGizmo({
   onMoveEnd,
   onRotateEnd,
   setDragging,
-  disabled
+  disabled,
+  arOverlay = false
 }: Props) {
   const [group, setGroup] = useState<Group | null>(null);
   const { gl } = useThree();
@@ -117,9 +120,14 @@ export function ObjectGizmo({
             roughness={mat.roughness}
             metalness={mat.metalness}
             emissive={mat.emissive}
-            emissiveIntensity={mat.emissiveIntensity}
-            transparent={isWall}
-            opacity={isWall ? 0.35 : 1}
+            emissiveIntensity={
+              arOverlay && !isWall
+                ? Math.max(mat.emissiveIntensity, 0.18)
+                : mat.emissiveIntensity
+            }
+            transparent={isWall || arOverlay}
+            opacity={isWall ? 0.35 : arOverlay ? 0.88 : 1}
+            depthWrite={!arOverlay || isWall}
           />
         </mesh>
         {selected && manipulable && (

@@ -89,9 +89,9 @@ export function CollaborationBar({
           type="button"
           className={`btn compact ${drawMode ? 'primary' : 'ghost'}`}
           onClick={onToggleDraw}
-          title="Draw on the back wall (shared)"
+          title="Draw in free 3D space (shared AR sketch)"
         >
-          {drawMode ? 'Drawing…' : 'Draw'}
+          {drawMode ? 'Sketching…' : 'AR sketch'}
         </button>
         {drawMode && (
           <>

@@ -3,173 +3,319 @@ import RealityKit
 import SwiftUI
 import UIKit
 
-/// AR overlay stub: place/move catalog anchors and push ops to the shared API
-/// (same `POST /scene/{id}/operations` path as the web twin).
-struct AROverlayView: View {
-    @Environment(SceneSyncStore.self) private var store
-    @State private var session = AROverlaySession()
-    @State private var placedCount = 0
-
-    var body: some View {
-        NavigationStack {
-            ZStack {
-                #if targetEnvironment(simulator)
-                ContentUnavailableView(
-                    "AR requires a device",
-                    systemImage: "arkit",
-                    description: Text(
-                        "On a physical iPhone/iPad this tab hosts an ARView. From Simulator, use the buttons below to push sample ops against the API."
-                    )
-                )
-                #else
-                ARViewContainer(session: session)
-                    .ignoresSafeArea()
-                #endif
-
-                VStack {
-                    Spacer()
-                    controlBar
-                }
-            }
-            .navigationTitle("AR Overlay")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        Task { await store.refresh() }
-                    } label: {
-                        Image(systemName: "arrow.clockwise")
-                    }
-                }
-            }
-            .task {
-                if store.scene == nil {
-                    await store.refresh()
-                }
-            }
-        }
-    }
-
-    private var controlBar: some View {
-        VStack(spacing: 10) {
-            Text(store.statusMessage)
-                .font(.caption)
-                .frame(maxWidth: .infinity)
-            if let err = store.lastError {
-                Text(err).font(.caption2).foregroundStyle(.red)
-            }
-
-            HStack(spacing: 12) {
-                Button("Place chair") {
-                    Task { await placeChair() }
-                }
-                .buttonStyle(.borderedProminent)
-
-                Button("Nudge +X") {
-                    Task { await nudgeSelected(dx: 0.25, dz: 0) }
-                }
-                .buttonStyle(.bordered)
-
-                Button("Nudge −Z") {
-                    Task { await nudgeSelected(dx: 0, dz: -0.25) }
-                }
-                .buttonStyle(.bordered)
-            }
-        }
-        .padding()
-        .background(.ultraThinMaterial)
-    }
-
-    private func placeChair() async {
-        placedCount += 1
-        let id = "ar_anchor_\(placedCount)"
-        let position = Vector3(0.5 * Double(placedCount % 3), 0.43, -0.8)
-        session.placeBox(id: id, at: position)
-
-        let op = SceneOperationDTO(
-            type: .addObject,
-            objectId: id,
-            targetPosition: position,
-            targetRotation: .identity,
-            assetId: "asset_chair_fold_01",
-            productId: "chair_fold_01",
-            objectType: "chair",
-            dimensions: DimensionsDTO(width: 0.48, height: 0.86, depth: 0.52),
-            movable: true,
-            source: "catalog"
-        )
-        await store.pushOps([op])
-    }
-
-    private func nudgeSelected(dx: Double, dz: Double) async {
-        guard let scene = store.scene else { return }
-        let target =
-            scene.objects.last(where: { $0.id.hasPrefix("ar_anchor_") })
-            ?? scene.objects.first(where: { $0.movable != false && $0.type != "wall" })
-        guard let object = target else {
-            store.lastError = "No movable object to nudge"
-            return
-        }
-        let next = Vector3(
-            object.transform.position.x + dx,
-            object.transform.position.y,
-            object.transform.position.z + dz
-        )
-        session.moveBox(id: object.id, to: next)
-        let op = SceneOperationDTO(
-            type: .moveObject,
-            objectId: object.id,
-            targetPosition: next,
-            targetRotation: nil,
-            assetId: nil,
-            productId: nil,
-            objectType: nil,
-            dimensions: nil,
-            movable: nil,
-            source: nil
-        )
-        await store.pushOps([op])
-    }
-}
-
-@Observable
-final class AROverlaySession {
-    weak var arView: ARView?
-    private var anchors: [String: AnchorEntity] = [:]
-
-    func placeBox(id: String, at position: Vector3) {
-        guard let arView else { return }
-        let mesh = MeshResource.generateBox(width: 0.48, height: 0.86, depth: 0.52)
-        let material = SimpleMaterial(color: .systemOrange, isMetallic: false)
-        let model = ModelEntity(mesh: mesh, materials: [material])
-        model.name = id
-        let anchor = AnchorEntity(world: Coordinates.toSIMD(position))
-        anchor.addChild(model)
-        arView.scene.addAnchor(anchor)
-        anchors[id] = anchor
-    }
-
-    func moveBox(id: String, to position: Vector3) {
-        anchors[id]?.position = Coordinates.toSIMD(position)
-    }
-}
-
 #if !targetEnvironment(simulator)
+/// Live camera ARView (Pokémon GO–style): world-tracking passthrough with shared scene overlays.
+/// Finger drag in draw mode places free-space 3D polylines (Y-up meters) synced via WS.
 struct ARViewContainer: UIViewRepresentable {
-    var session: AROverlaySession
+    let scene: SceneDTO?
+    var selectedObjectId: String?
+    var strokes: [DrawingStrokeDTO] = []
+    var ghosts: [PresenceUserDTO] = []
+    var drawMode: Bool = false
+    var onSelect: ((String?) -> Void)?
+    var onStrokeComplete: (([Vector3]) -> Void)?
 
     func makeUIView(context: Context) -> ARView {
         let view = ARView(frame: .zero)
         let config = ARWorldTrackingConfiguration()
-        config.planeDetection = [.horizontal]
+        config.planeDetection = [.horizontal, .vertical]
         if ARWorldTrackingConfiguration.supportsSceneReconstruction(.mesh) {
             config.sceneReconstruction = .mesh
         }
-        view.session.run(config)
-        session.arView = view
+        view.session.run(config, options: [.resetTracking, .removeExistingAnchors])
+        context.coordinator.root = AnchorEntity(world: .zero)
+        if let root = context.coordinator.root {
+            view.scene.addAnchor(root)
+        }
+        let tap = UITapGestureRecognizer(
+            target: context.coordinator,
+            action: #selector(Coordinator.handleTap(_:))
+        )
+        view.addGestureRecognizer(tap)
+        let pan = UIPanGestureRecognizer(
+            target: context.coordinator,
+            action: #selector(Coordinator.handlePan(_:))
+        )
+        pan.maximumNumberOfTouches = 1
+        view.addGestureRecognizer(pan)
+        context.coordinator.hostView = view
+        context.coordinator.onSelect = onSelect
+        context.coordinator.onStrokeComplete = onStrokeComplete
+        context.coordinator.drawMode = drawMode
+        rebuild(in: view, coordinator: context.coordinator)
         return view
     }
 
-    func updateUIView(_ uiView: ARView, context: Context) {}
+    func updateUIView(_ uiView: ARView, context: Context) {
+        context.coordinator.onSelect = onSelect
+        context.coordinator.onStrokeComplete = onStrokeComplete
+        context.coordinator.drawMode = drawMode
+        rebuild(in: uiView, coordinator: context.coordinator)
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(parent: self)
+    }
+
+    final class Coordinator: NSObject {
+        var parent: ARViewContainer
+        var root: AnchorEntity?
+        weak var hostView: ARView?
+        var onSelect: ((String?) -> Void)?
+        var onStrokeComplete: (([Vector3]) -> Void)?
+        var drawMode = false
+        var renderedVersion = -1
+        var renderedCount = -1
+        var renderedSelection: String? = "___"
+        var renderedStrokeCount = -1
+        var renderedGhostCount = -1
+        private var draftPoints: [Vector3] = []
+        private var draftEntity: Entity?
+
+        init(parent: ARViewContainer) {
+            self.parent = parent
+        }
+
+        @objc func handleTap(_ gesture: UITapGestureRecognizer) {
+            guard !drawMode, let view = hostView else { return }
+            let loc = gesture.location(in: view)
+            let hits = view.hitTest(loc)
+            let name = hits.compactMap { $0.entity.name }.first {
+                !$0.isEmpty
+                    && $0 != "floor"
+                    && !$0.hasPrefix("grid_")
+                    && !$0.hasPrefix("ghost_")
+                    && !$0.hasPrefix("stroke_")
+                    && !$0.hasPrefix("draft_")
+            }
+            onSelect?(name)
+        }
+
+        @objc func handlePan(_ gesture: UIPanGestureRecognizer) {
+            guard drawMode, let view = hostView else { return }
+            let loc = gesture.location(in: view)
+            switch gesture.state {
+            case .began:
+                draftPoints = []
+                draftEntity?.removeFromParent()
+                draftEntity = Entity()
+                draftEntity?.name = "draft_stroke"
+                if let draftEntity, let root {
+                    root.addChild(draftEntity)
+                }
+                if let p = freeSpacePoint(at: loc, in: view) {
+                    draftPoints = [p]
+                }
+            case .changed:
+                guard let p = freeSpacePoint(at: loc, in: view) else { return }
+                if let last = draftPoints.last {
+                    let dx = p.x - last.x
+                    let dy = p.y - last.y
+                    let dz = p.z - last.z
+                    if dx * dx + dy * dy + dz * dz < 0.0009 { return }
+                }
+                draftPoints.append(p)
+                refreshDraftMesh()
+            case .ended, .cancelled:
+                let pts = draftPoints
+                draftPoints = []
+                draftEntity?.removeFromParent()
+                draftEntity = nil
+                if pts.count >= 2 {
+                    onStrokeComplete?(pts)
+                }
+            default:
+                break
+            }
+        }
+
+        /// Place a point along the camera ray (~1.2 m) so strokes live in free 3D space.
+        private func freeSpacePoint(at screen: CGPoint, in view: ARView) -> Vector3? {
+            guard let frame = view.session.currentFrame else { return nil }
+            let cam = frame.camera.transform
+            let camPos = SIMD3<Float>(cam.columns.3.x, cam.columns.3.y, cam.columns.3.z)
+            let forward = -SIMD3<Float>(cam.columns.2.x, cam.columns.2.y, cam.columns.2.z)
+            let right = SIMD3<Float>(cam.columns.0.x, cam.columns.0.y, cam.columns.0.z)
+            let up = SIMD3<Float>(cam.columns.1.x, cam.columns.1.y, cam.columns.1.z)
+            let size = view.bounds.size
+            guard size.width > 1, size.height > 1 else { return nil }
+            let ndcX = Float((2 * screen.x / size.width) - 1)
+            let ndcY = Float(1 - (2 * screen.y / size.height))
+            let depth: Float = 1.25
+            let fovScale: Float = 0.65
+            let dir = normalize(forward) + right * ndcX * fovScale + up * ndcY * fovScale
+            let world = camPos + normalize(dir) * depth
+            return Vector3(Double(world.x), Double(world.y), Double(world.z))
+        }
+
+        private func refreshDraftMesh() {
+            guard let draftEntity, draftPoints.count >= 2 else { return }
+            draftEntity.children.forEach { $0.removeFromParent() }
+            let mat = SimpleMaterial(color: .systemYellow.withAlphaComponent(0.9), isMetallic: false)
+            for i in 0..<(draftPoints.count - 1) {
+                draftEntity.addChild(
+                    ARStrokeMesh.segment(
+                        from: Coordinates.toSIMD(draftPoints[i]),
+                        to: Coordinates.toSIMD(draftPoints[i + 1]),
+                        radius: 0.012,
+                        material: mat,
+                        name: "draft_seg"
+                    )
+                )
+            }
+        }
+    }
+
+    private func rebuild(in view: ARView, coordinator: Coordinator) {
+        guard let root = coordinator.root else { return }
+        let version = scene?.version ?? -1
+        let count = scene?.objects.count ?? -1
+        let strokeCount = strokes.count
+        let ghostCount = ghosts.count
+        if version == coordinator.renderedVersion,
+           count == coordinator.renderedCount,
+           selectedObjectId == coordinator.renderedSelection,
+           strokeCount == coordinator.renderedStrokeCount,
+           ghostCount == coordinator.renderedGhostCount {
+            return
+        }
+        coordinator.renderedVersion = version
+        coordinator.renderedCount = count
+        coordinator.renderedSelection = selectedObjectId
+        coordinator.renderedStrokeCount = strokeCount
+        coordinator.renderedGhostCount = ghostCount
+        coordinator.parent = self
+
+        // Keep in-progress draft while rebuilding peers/objects.
+        let draft = coordinator.draftEntity
+        root.children.forEach { child in
+            if child.name != "draft_stroke" {
+                child.removeFromParent()
+            }
+        }
+        guard let scene else { return }
+
+        for object in scene.objects where object.type != "wall" {
+            let entity = makeOverlayProxy(for: object, selected: object.id == selectedObjectId)
+            root.addChild(entity)
+        }
+        for ghost in GhostAvatarAnchors.remoteGhosts(from: ghosts, localUserId: APIConfig.actorId) {
+            root.addChild(makeGhost(ghost))
+        }
+        for stroke in strokes {
+            root.addChild(ARStrokeMesh.makeEntity(stroke))
+        }
+        if let draft, draft.parent == nil {
+            root.addChild(draft)
+        }
+    }
+
+    private func makeOverlayProxy(for object: SceneObjectDTO, selected: Bool) -> ModelEntity {
+        let w = Float(object.dimensions?.width ?? 0.5)
+        let h = Float(object.dimensions?.height ?? 0.5)
+        let d = Float(object.dimensions?.depth ?? 0.5)
+        let base: UIColor = object.source == "existing"
+            ? .systemOrange.withAlphaComponent(selected ? 0.55 : 0.35)
+            : .systemTeal.withAlphaComponent(selected ? 0.55 : 0.4)
+        let color: UIColor = selected ? .systemYellow.withAlphaComponent(0.55) : base
+        let entity = ModelEntity(
+            mesh: .generateBox(width: w, height: h, depth: d),
+            materials: [SimpleMaterial(color: color, isMetallic: false)]
+        )
+        entity.name = object.id
+        entity.position = Coordinates.toSIMD(object.transform.position)
+        entity.orientation = Coordinates.toSIMDQuat(object.transform.rotation)
+        entity.generateCollisionShapes(recursive: true)
+        return entity
+    }
+
+    private func makeGhost(_ user: PresenceUserDTO) -> Entity {
+        let parent = Entity()
+        parent.name = "ghost_\(user.userId)"
+        if let pos = user.position {
+            parent.position = Coordinates.toSIMD(pos)
+        }
+        let tint = UIColor(hex: user.color ?? "#6eb4c8") ?? .systemTeal
+        let body = ModelEntity(
+            mesh: .generateCylinder(height: 0.7, radius: 0.16),
+            materials: [SimpleMaterial(color: tint.withAlphaComponent(0.35), isMetallic: false)]
+        )
+        body.name = parent.name
+        parent.addChild(body)
+        return parent
+    }
 }
 #endif
+
+/// Shared stroke mesh builder (device AR + simulator map).
+enum ARStrokeMesh {
+    static func makeEntity(_ stroke: DrawingStrokeDTO) -> Entity {
+        let parent = Entity()
+        parent.name = "stroke_\(stroke.strokeId)"
+        let pts = stroke.points
+        guard pts.count >= 2 else { return parent }
+        let color = UIColor(hex: stroke.color) ?? .systemYellow
+        let mat = SimpleMaterial(color: color.withAlphaComponent(0.85), isMetallic: false)
+        let radius = Float(max(stroke.width, 0.015)) * 0.5
+        for i in 0..<(pts.count - 1) {
+            parent.addChild(
+                segment(
+                    from: Coordinates.toSIMD(pts[i]),
+                    to: Coordinates.toSIMD(pts[i + 1]),
+                    radius: radius,
+                    material: mat,
+                    name: parent.name
+                )
+            )
+        }
+        return parent
+    }
+
+    static func segment(
+        from a: SIMD3<Float>,
+        to b: SIMD3<Float>,
+        radius: Float,
+        material: SimpleMaterial,
+        name: String
+    ) -> ModelEntity {
+        let mid = (a + b) * 0.5
+        let delta = b - a
+        let len = length(delta)
+        let seg = ModelEntity(
+            mesh: .generateBox(width: radius * 2, height: radius * 2, depth: max(len, 0.001)),
+            materials: [material]
+        )
+        seg.name = name
+        seg.position = mid
+        let dir = normalize(delta)
+        let axis = cross(SIMD3(0, 0, -1), dir)
+        let axisLen = length(axis)
+        if axisLen > 0.001 {
+            let angle = acos(max(-1, min(1, dot(SIMD3(0, 0, -1), dir))))
+            seg.orientation = simd_quatf(angle: angle, axis: normalize(axis))
+        } else if dot(SIMD3(0, 0, -1), dir) < 0 {
+            seg.orientation = simd_quatf(angle: .pi, axis: SIMD3(0, 1, 0))
+        }
+        return seg
+    }
+}
+
+private extension UIColor {
+    convenience init?(hex: String) {
+        var s = hex.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        if s.hasPrefix("#") { s.removeFirst() }
+        guard s.count == 6, let value = UInt64(s, radix: 16) else { return nil }
+        let r = CGFloat((value & 0xFF0000) >> 16) / 255
+        let g = CGFloat((value & 0x00FF00) >> 8) / 255
+        let b = CGFloat(value & 0x0000FF) / 255
+        self.init(red: r, green: g, blue: b, alpha: 1)
+    }
+}
+
+/// Legacy name kept for project references.
+struct AROverlayView: View {
+    var body: some View {
+        Text("Use Live AR from the scan-first flow.")
+            .foregroundStyle(.secondary)
+    }
+}

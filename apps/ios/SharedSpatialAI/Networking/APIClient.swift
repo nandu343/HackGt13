@@ -141,6 +141,44 @@ actor APIClient {
         }
     }
 
+    /// POST /scene/{id}/invites — shareable join token for the web twin.
+    func createInvite(sceneId: String, label: String? = nil) async throws -> SceneInviteDTO {
+        let url = APIConfig.baseURL.appending(path: "scene/\(sceneId)/invites")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        struct Body: Encodable {
+            var actorId: String
+            var label: String?
+        }
+        do {
+            request.httpBody = try encoder.encode(
+                Body(actorId: APIConfig.actorId, label: label)
+            )
+        } catch {
+            throw APIClientError.encoding(error)
+        }
+        let (data, response) = try await session.data(for: request)
+        try Self.throwIfNeeded(response, data: data)
+        do {
+            return try decoder.decode(SceneInviteDTO.self, from: data)
+        } catch {
+            throw APIClientError.decoding(error)
+        }
+    }
+
+    /// GET /scene/{id}/invites/default
+    func defaultInvite(sceneId: String) async throws -> SceneInviteDTO {
+        let url = APIConfig.baseURL.appending(path: "scene/\(sceneId)/invites/default")
+        let (data, response) = try await session.data(from: url)
+        try Self.throwIfNeeded(response, data: data)
+        do {
+            return try decoder.decode(SceneInviteDTO.self, from: data)
+        } catch {
+            throw APIClientError.decoding(error)
+        }
+    }
+
     private static func throwIfNeeded(_ response: URLResponse, data: Data) throws {
         guard let http = response as? HTTPURLResponse else { return }
         guard (200..<300).contains(http.statusCode) else {

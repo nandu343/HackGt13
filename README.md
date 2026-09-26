@@ -1,18 +1,19 @@
 # Shared Spatial AI
 
-HackGT 13 — collaborative spatial planning: one canonical scene graph, a browser digital twin, validated AI ops, and a clear path to AR / realtime / commerce.
+HackGT 13 — collaborative spatial planning: one canonical scene graph, **Pokémon GO–style camera AR** (real room + overlays), free-space AR sketches, validated AI ops, and a secondary digital-twin map — all on the **same** scene.
 
-> Every client and the AI edit the **same** scene. The renderer never owns world state.
+> **Scan / enter first → live Camera AR over the real room → plan / draw / invite.** Every client and the AI edit the **same** scene. The renderer never owns world state.
 
 ```text
-Room / demo seed
+Scan room (iOS RoomPlan) / Enter Camera AR (web)
       ↓
 Canonical scene graph (versioned ops)
-      ├── Web 3D twin (this repo)
+      ├── Web Camera AR (getUserMedia + optional WebXR immersive-ar)
+      ├── Web Map twin (secondary dollhouse)
+      ├── Free-space AR sketch (WS draw_stroke, 3D polylines)
       ├── AI planner → ops (accept to apply)
-      ├── Catalog + budget
-      ├── Invite links (unlimited peers)
-      └── iOS RoomPlan / RealityKit scaffold (`apps/ios`)
+      ├── Catalog + budget + invite links
+      └── iOS Live AR (ARKit camera passthrough) after scan
 ```
 
 ---
@@ -21,11 +22,11 @@ Canonical scene graph (versioned ops)
 
 | Area | Before | After |
 |------|--------|-------|
-| **Chrome** | Dense hackathon dashboard — every panel always open | Core flow (plan → AI → place → invite) first; timeline / disagreement / draw grouped under **Advanced tools** (tabbed on mobile) |
-| **Invite** | “Open a second tab” only | Shareable `?scene=…&invite=TOKEN` links, **Invite friends** CTA, optional display name, **no peer cap** |
-| **Existing furniture** | Walls + furniture treated similarly; unclear clear-out | Click `source: existing` furniture → gizmo move or Remove (confirm) / Delete×2; walls stay fixed |
-| **Empty states** | Bare overlay text | Loading pulse, error + Retry, empty presence copy |
-| **Visual** | Functional dark panel | Clearer hierarchy, breathing room, accent invite CTAs, selection bar on the twin |
+| **AR framing** | Synthetic twin as primary | **Camera AR** (real room + overlays) is the hero |
+| **Drawing** | Wall whiteboard plane | **Draw in space** — free 3D polylines synced to peers |
+| **Flow** | Tools first; room optional | **Scan / enter first**, then Plan / Invite / sketch in AR |
+| **Web twin** | Orbit dollhouse only | Map twin is **secondary**; Camera AR default |
+| **iOS** | Tab clutter | Scan → **Live AR** (camera) → Plan / Invite / Draw in space |
 
 Mesh voice may degrade at high N (WebRTC is O(n²)); joins are still allowed.
 
@@ -52,7 +53,7 @@ Mesh voice may degrade at high N (WebRTC is O(n²)); joins are still allowed.
 | `LOCK_TTL_SECONDS` | api | `30` | Soft-lock TTL for collaborative edits |
 | `SCENE_STORE` | api | `memory` | `supabase` when using Postgres persistence |
 
-See `.env.example` for Supabase optional keys. iOS API URL / scene id live in **[apps/ios/README.md](apps/ios/README.md)** (`APIConfig.swift`) — do not duplicate device LAN setup here.
+See `.env.example` for Supabase optional keys. iOS API URL / scene id: **Settings in-app** or **[apps/ios/README.md](apps/ios/README.md)** — do not duplicate device LAN setup here.
 
 ### Install
 
@@ -86,7 +87,7 @@ py -3.12 -m uvicorn app.main:app --reload --app-dir apps/api --host 0.0.0.0 --po
 
 Use `--host 0.0.0.0` when syncing from a physical iOS device.
 
-### iOS scaffold (optional 3rd client)
+### iOS (3rd client)
 
 See **[apps/ios/README.md](apps/ios/README.md)**. On a Mac:
 
@@ -94,40 +95,46 @@ See **[apps/ios/README.md](apps/ios/README.md)**. On a Mac:
 open apps/ios/SharedSpatialAI.xcodeproj
 ```
 
-Simulator: Viewer + demo `POST /scene`. LiDAR device: RoomPlan capture + AR ops. Same `scene_party_001` / Y-up meters as the web twin.
+**Simulator:** Scan gate → **Use demo room** → map twin + Draw in space + Plan. **LiDAR device:** RoomPlan → **Live AR** (camera passthrough) with furniture overlays + free-space sketch. Same `scene_party_001` / Y-up meters as the web twin.
 
 ---
 
-## Demo loop (web)
+## Demo loop
 
-1. Open the web app — status pill should read **API connected · v1** (scene `scene_party_001`). Peer count appears when WS presence is live.
-2. **Invite friends** (header / primary CTA / collab bar): copy the shareable link (`?scene=…&invite=TOKEN`). Set an optional display name. Open the link in another browser / device — no joiner limit.
-3. **Plan with friends** (auto-opens once after first load / Skip marks it seen): scenario chips, notes, friends’ ideas over WS → **Get AI recommendations** → **Accept into scene**.
-4. **Clear what’s in the way:** click the sofa (`source: existing`) → amber selection ring + bar → drag gizmo to move, or **Remove** (confirm) / press **Delete** twice. Walls stay fixed. Peers see the op via WS patch.
-5. **Drag** catalog objects → optimistic move → `POST /scene/.../operations`. Second tab confirms **patch** sync.
-6. **Voice:** **Join voice** on both tabs → allow mic → talk. Mesh may get noisy with many peers; unlimited join still works.
-7. **Draw:** sidebar **Tools** / collab **Draw** → paint on the back wall; **Clear mine** / **Clear all**.
-8. Sidebar **Plan** → AI layout Generate / Accept / Propose. **Shop** → Budget + Catalog. **Advanced tools** (desktop) or **Tools** tab (mobile): Timeline, Disagreement, Draw.
-9. **Timeline:** Restore / Branch. **Disagreement:** A/B ghosts → Blend or picks.
-10. Keyboard: click select · `Delete`×2 remove · `Ctrl/Cmd+Z` undo · `Esc` deselect / exit draw.
+### Web (desktop or phone browser)
 
-If the status shows an error, start the API and hit **Reload** / **Retry**.
+1. Open [http://localhost:3000](http://localhost:3000) — **Enter Camera AR** gate (invite links skip in).
+2. Allow camera → rear feed + shared furniture overlays (**Camera AR**). Toggle **Map twin** for the exact digital twin.
+3. On supported browsers (typically Android Chrome / WebXR devices): **WebXR AR** for `immersive-ar`.
+4. **Invite** → share `?scene=…&invite=TOKEN` → peer joins the same scene.
+5. **Plan** → AI → **Accept**. **AR sketch** → draw in free 3D space (not a wall whiteboard).
+6. Drag / remove existing furniture; walls stay fixed.
+
+**Web Camera AR limits:** `getUserMedia` backdrop is **approximate** (no full 6DoF world tracking). Use iOS Live AR or WebXR for true world-locked overlays. Map twin stays exact.
+
+Reset the gate with `?gate=1` if needed.
+
+### iPhone (physical device)
+
+1. Start API with `--host 0.0.0.0`; set Settings → Mac LAN IP.
+2. **Scan room** (RoomPlan) → enter **Live AR** (camera shows the real room).
+3. Tap furniture → move / remove; **Place** catalog chair; **Draw in space** (finger drag → 3D stroke synced via WS).
+4. **Invite** → open link on web; peers see the same ops + strokes.
 
 ---
 
-## Collaboration (voice + whiteboard + intent + invite + timeline)
+## Collaboration (voice + AR sketch + intent + invite + timeline)
 
 | Feature | Approach |
 |---------|----------|
-| **Invite** | `POST /scene/{id}/invites` → token; web URL `/?scene={id}&invite={token}`. `GET /invite/{token}` resolves. Optional display name on join (localStorage). **No hard presence / peer cap** — WS accepts unlimited joiners for a `sceneId`. Mesh voice may degrade at high N. |
-| **Voice** | WebRTC **mesh** (STUN). Signaling over `WS /ws/scene/{id}`: `rtc_offer` / `rtc_answer` / `rtc_ice`. Presence: `voiceEnabled` / `voiceSpeaking`. |
-| **Drawing** | Ephemeral spatial strokes on the back wall. WS: `draw_stroke` / `draw_clear`; hub keeps ≤200 strokes; included on `welcome`. |
-| **Intent** | Post-scan group goal. WS: `intent_open` / `intent_draft` / `intent_idea`. Web modal → `POST /ai/layout` → Accept. |
-| **Timeline** | Version snapshots. `GET /scene/{id}/timeline`, restore / branch. WS `timeline`. |
-| **Disagreement** | A/B proposals + ghosts; blend / picks. WS `disagreement`. |
-| **Existing furniture** | `source: 'existing'` (non-wall) is relocatable/removable for planning; structure (`wall`, …) stays protected in validators. |
+| **Invite** | `POST /scene/{id}/invites` → token; web URL `/?scene={id}&invite={token}`. **No peer cap.** |
+| **Voice** | WebRTC mesh; signaling on `WS /ws/scene/{id}`. |
+| **Drawing** | Free-space 3D polylines; WS `draw_stroke` / `draw_clear` (`plane: "free"`). |
+| **Intent** | Plan modal → `POST /ai/layout` → Accept. |
+| **Timeline / Disagreement** | Restore/branch; A/B ghosts. |
+| **Existing furniture** | Relocatable/removable; structure fixed. |
 
-iOS: **[apps/ios/README.md](apps/ios/README.md)** — invite links + selecting existing furniture in AR (stubs).
+iOS: scan-first Live AR + Plan + Invite + Draw — **[apps/ios/README.md](apps/ios/README.md)**.
 
 ---
 
@@ -139,61 +146,37 @@ iOS: **[apps/ios/README.md](apps/ios/README.md)** — invite links + selecting e
 | `GET` | `/scene/{sceneId}` | Full scene |
 | `POST` | `/scene` | Upsert full scene (RoomPlan / iOS export) |
 | `PUT` | `/scene/{sceneId}` | Same upsert by path |
-| `POST` | `/scene/{sceneId}/operations` | Validate + apply; `409` on stale `baseVersion` / foreign locks |
-| `POST` | `/scene/{sceneId}/locks` | Soft-lock acquire |
-| `POST` | `/scene/{sceneId}/locks/release` | Soft-lock release |
+| `POST` | `/scene/{sceneId}/operations` | Validate + apply; `409` on stale `baseVersion` |
 | `POST` | `/scene/{sceneId}/invites` | Create shareable invite token |
-| `GET` | `/scene/{sceneId}/invites` | List invites for scene |
-| `GET` | `/scene/{sceneId}/invites/default` | Ensure + return one invite |
-| `GET` | `/invite/{token}` | Resolve token → `sceneId` + `joinPath` |
-| `GET` | `/scene/{sceneId}/timeline` | Version history snapshots |
-| `POST` | `/scene/{sceneId}/timeline/restore` | Restore scene to an entry |
-| `POST` | `/scene/{sceneId}/timeline/branch` | Fork named branch → new `sceneId` |
-| `GET` | `/scene/{sceneId}/disagreement` | Active A/B disagreement or `null` |
-| `POST` | `/scene/{sceneId}/disagreement` | Open proposal A |
-| `POST` | `/scene/{sceneId}/disagreement/{id}/counter` | Set / replace proposal B |
-| `POST` | `/scene/{sceneId}/disagreement/{id}/compromise` | Blend / picks / a / b |
-| `POST` | `/scene/{sceneId}/disagreement/{id}/resolve` | Accept A, B, or cancel |
-| `POST` | `/ai/layout` | Hybrid planner ops (**not** applied until client Accept) |
-| `GET` | `/catalog` | Seed products |
-| `POST` | `/commerce/cart/summary` | Cart from scene products |
-| `POST` | `/commerce/checkout` | Stripe test Checkout or sandbox stub URL |
-| `WS` | `/ws/scene/{sceneId}` | `welcome` / `presence` / `scene` / `patch` / `lock` + voice `rtc_*` + `draw_*` + `intent_*` + `timeline` + `disagreement` — **unlimited presence** |
-
-Web client connects to the WebSocket by default (`apps/web/lib/ws.ts`). Set `NEXT_PUBLIC_SCENE_WS=0` to use HTTP-only.
+| `GET` | `/invite/{token}` | Resolve token → `sceneId` |
+| `POST` | `/ai/layout` | Hybrid planner ops (**not** applied until Accept) |
+| `WS` | `/ws/scene/{sceneId}` | Presence / patch / voice / draw / intent — **unlimited presence** |
 
 ---
 
 ## Repo layout
 
 ```text
-apps/web          Next.js + R3F digital twin
-apps/api          FastAPI scene store, ops, AI stub, catalog, invites
-apps/ios          RoomPlan capture + RealityKit viewer + AR ops stub
+apps/web          Next.js + R3F Camera AR + Map twin
+apps/api          FastAPI scene store, ops, AI, catalog, invites
+apps/ios          Scan-first → Live AR + Plan / Invite / Draw
 packages/schema   Shared Zod/TS types + demo seed
 ```
-
-Web twin pieces:
-
-- `lib/api.ts` / `lib/sceneStore.ts` — fetch, optimistic ops, Accept lerp, undo, intent, invites, timeline, disagreement
-- `lib/objectPolicy.ts` — structure vs relocatable existing furniture
-- `components/SceneCanvas`, `ObjectGizmo`, `SelectionBar`, `InviteModal`, `IntentModal`, `SidebarShell`, …
 
 ---
 
 ## Architecture notes
 
-- **Ops-only AI**: planner returns `MOVE_OBJECT` / `ADD_OBJECT` / …; applier + validators own legality.
-- **Existing furniture**: validators allow relocate/delete for non-structure objects (including `source: existing`); walls / openings stay fixed.
-- **Invites**: in-memory tokens; join URL is enough for demos (no auth gate).
-- **Versioning**: every successful envelope increments `version`; clients send `baseVersion`.
-- **Timeline**: in-memory append log of scene snapshots for restore / branch demos.
-- **Coordinate system**: Y-up meters, origin at floor center (see schema package).
+- **Ops-only AI**: planner returns ops; validators own legality.
+- **Camera AR first**: real room via device camera; shared graph as overlays.
+- **Free-space drawing**: strokes are arbitrary Y-up meter polylines (not wall-only).
+- **Coordinate system**: Y-up meters, origin at floor center.
+- **WebXR**: `@react-three/xr` `immersive-ar` when `navigator.xr` supports it; else getUserMedia fallback.
 
 ---
 
 ## Status
 
-**Working for demo:** web ←→ API scene loop, **invite links (unlimited peers)**, **post-scan Plan with friends**, drag / clear existing furniture, hybrid AI accept/reject, timeline restore/branch, disagreement A/B, catalog/budget, checkout stub/Stripe, WS presence/patch/locks, WebRTC voice mesh + wall drawing + ghost avatars, polished UX chrome, iOS RoomPlan/AR scaffold + Plan this room sheet.
+**Working for demo:** Camera AR + Map twin (web), iOS Live AR after RoomPlan, free-space AR sketch sync, invite links, Plan with friends, drag / clear existing furniture, hybrid AI, timeline / disagreement, catalog/budget, WS presence + voice + draw.
 
-**Optional / later polish:** deep Supabase auth & Realtime channel (local WS is the required path), richer Stripe UX, TURN for cellular voice, iOS WebRTC/AVAudio join + deep-link invite handler.
+**Known limits:** Web getUserMedia AR is not full SLAM; WebXR needs a compatible device/browser; iOS WebRTC voice still optional.

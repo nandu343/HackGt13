@@ -26,6 +26,7 @@ def plan_layout(scene: Scene, request: LayoutRequest) -> LayoutResponse:
             catalog,
             api_key=settings.xai_api_key,
             scenario=scenario,
+            timeout_seconds=settings.xai_timeout_seconds,
         )
         if response is not None:
             source = 'llm'

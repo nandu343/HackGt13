@@ -59,6 +59,187 @@ textarea {
   background: linear-gradient(180deg, #a8c8d8, #d8e4dc 50%, #c4cec0);
 }
 
+/* Camera AR: solid dark until video is ready — no fake room / passthrough gradients */
+.hud-viewport.ar-view {
+  background: #0a0e12;
+}
+
+.hud-viewport.map-view {
+  background: linear-gradient(180deg, #a8c8d8, #d8e4dc 50%, #c4cec0);
+}
+
+.camera-ar-bg {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  background: #0a0e12;
+}
+
+.camera-ar-video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0;
+  transition: opacity 0.35s ease;
+}
+
+.camera-ar-video.is-ready {
+  opacity: 1;
+}
+
+.camera-ar-fallback {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  padding: 24px;
+  text-align: center;
+  background: #0a0e12;
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 0.9rem;
+}
+
+.camera-ar-fallback-detail {
+  margin-top: 6px;
+  font-size: 0.75rem;
+  opacity: 0.7;
+}
+
+.hud-viewport.ar-view .scene-canvas {
+  z-index: 1;
+  background: transparent;
+}
+
+.scene-canvas.ar-mode canvas {
+  background: transparent !important;
+}
+
+.hud-shell.ar-active .hud-topbar {
+  background: rgba(10, 14, 18, 0.42);
+  backdrop-filter: blur(10px);
+}
+
+.hud-shell.ar-active .hud-scene-meta {
+  color: rgba(230, 234, 239, 0.9);
+  background: rgba(10, 14, 18, 0.55);
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+.scene-canvas.ar-mode {
+  mix-blend-mode: normal;
+}
+
+.ar-reticle {
+  position: absolute;
+  left: 50%;
+  top: 48%;
+  width: 18px;
+  height: 18px;
+  margin: -9px 0 0 -9px;
+  border: 1.5px solid rgba(255, 255, 255, 0.85);
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.25);
+  pointer-events: none;
+  z-index: 3;
+}
+
+.ar-reticle::before,
+.ar-reticle::after {
+  content: '';
+  position: absolute;
+  background: rgba(255, 255, 255, 0.85);
+}
+
+.ar-reticle::before {
+  left: 50%;
+  top: -6px;
+  width: 1.5px;
+  height: 30px;
+  margin-left: -0.75px;
+}
+
+.ar-reticle::after {
+  top: 50%;
+  left: -6px;
+  height: 1.5px;
+  width: 30px;
+  margin-top: -0.75px;
+}
+
+/* Scan-first / enter-room gate */
+.room-gate {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(8, 12, 16, 0.55);
+  backdrop-filter: blur(8px);
+}
+
+.room-gate-card {
+  width: min(440px, 100%);
+  padding: 28px 26px 22px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: linear-gradient(165deg, rgba(18, 24, 32, 0.96), rgba(12, 16, 22, 0.94));
+  box-shadow: var(--shadow);
+  text-align: left;
+}
+
+.room-gate-kicker {
+  margin: 0 0 6px;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.room-gate-card h1 {
+  margin: 0 0 10px;
+  font-size: 1.55rem;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+
+.room-gate-copy {
+  margin: 0 0 16px;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.room-gate-error {
+  margin: 0 0 12px;
+  color: var(--danger);
+  font-size: 13px;
+}
+
+.room-gate-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.room-gate-actions .btn {
+  width: 100%;
+  justify-content: center;
+}
+
+.room-gate-hint {
+  margin: 14px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.room-gate-hint code {
+  font-size: 11px;
+  color: var(--accent-2);
+}
+
 .hud-viewport.is-drawing {
   box-shadow: inset 0 0 0 2px rgba(201, 166, 107, 0.55);
 }
@@ -545,6 +726,23 @@ textarea {
 
 .btn.accent.compact {
   width: auto;
+}
+
+.view-mode-toggle {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 5px;
+  border: 1px solid var(--line);
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.view-mode-toggle .btn {
+  border-color: transparent;
+}
+
+.view-mode-toggle .btn.primary {
+  border-color: rgba(110, 180, 200, 0.4);
 }
 
 .btn.danger,
@@ -1338,6 +1536,14 @@ kbd {
 
 .intent-actions {
   margin-top: 2px;
+}
+
+.intent-loading {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: flex-start;
+  margin-bottom: 10px;
 }
 
 .intent-preview {

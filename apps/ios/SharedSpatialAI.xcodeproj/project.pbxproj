@@ -25,6 +25,8 @@
 		B10011 /* CollaborationStubs.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10011 /* CollaborationStubs.swift */; };
 		B10012 /* LayoutModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10012 /* LayoutModels.swift */; };
 		B10013 /* PlanRoomSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10013 /* PlanRoomSheet.swift */; };
+		B10014 /* InviteSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10014 /* InviteSheet.swift */; };
+		B10015 /* SceneWebSocket.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10015 /* SceneWebSocket.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -47,6 +49,8 @@
 		F10011 /* CollaborationStubs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CollaborationStubs.swift; sourceTree = "<group>"; };
 		F10012 /* LayoutModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LayoutModels.swift; sourceTree = "<group>"; };
 		F10013 /* PlanRoomSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanRoomSheet.swift; sourceTree = "<group>"; };
+		F10014 /* InviteSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InviteSheet.swift; sourceTree = "<group>"; };
+		F10015 /* SceneWebSocket.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneWebSocket.swift; sourceTree = "<group>"; };
 		P10001 /* SharedSpatialAI.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SharedSpatialAI.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -112,6 +116,7 @@
 				F10004 /* APIConfig.swift */,
 				F10005 /* APIClient.swift */,
 				F10006 /* SceneSyncStore.swift */,
+				F10015 /* SceneWebSocket.swift */,
 			);
 			path = Networking;
 			sourceTree = "<group>";
@@ -123,6 +128,7 @@
 				F10008 /* RoomCaptureViewController.swift */,
 				F10009 /* CaptureFlowView.swift */,
 				F10013 /* PlanRoomSheet.swift */,
+				F10014 /* InviteSheet.swift */,
 			);
 			path = RoomPlan;
 			sourceTree = "<group>";
@@ -246,10 +252,12 @@
 				B10004 /* APIConfig.swift in Sources */,
 				B10005 /* APIClient.swift in Sources */,
 				B10006 /* SceneSyncStore.swift in Sources */,
+				B10015 /* SceneWebSocket.swift in Sources */,
 				B10007 /* RoomPlanExporter.swift in Sources */,
 				B10008 /* RoomCaptureViewController.swift in Sources */,
 				B10009 /* CaptureFlowView.swift in Sources */,
 				B10013 /* PlanRoomSheet.swift in Sources */,
+				B10014 /* InviteSheet.swift in Sources */,
 				B1000A /* SceneViewerView.swift in Sources */,
 				B1000B /* AROverlayView.swift in Sources */,
 				B10012 /* LayoutModels.swift in Sources */,

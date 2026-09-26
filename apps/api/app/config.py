@@ -40,6 +40,13 @@ class Settings:
             os.getenv('XAI_API_KEY', '').strip()
             or os.getenv('OPENAI_API_KEY', '').strip()
         )
+        # Hard cap so a hung Grok call never blocks /ai/layout (fallback to rules).
+        try:
+            self.xai_timeout_seconds = float(os.getenv('XAI_TIMEOUT_SECONDS', '8'))
+        except ValueError:
+            self.xai_timeout_seconds = 8.0
+        if self.xai_timeout_seconds <= 0:
+            self.xai_timeout_seconds = 8.0
         # Commerce (Phase 4) — Stripe test mode optional; stub otherwise
         self.stripe_secret_key = os.getenv('STRIPE_SECRET_KEY', '').strip()
         self.stripe_success_url = os.getenv(

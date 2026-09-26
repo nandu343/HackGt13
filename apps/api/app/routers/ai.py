@@ -7,7 +7,7 @@ from ..store import get_store
 router = APIRouter(prefix='/ai', tags=['ai'])
 
 
-@router.post('/layout', response_model=LayoutResponse)
+@router.post('/layout', response_model=LayoutResponse, response_model_exclude_none=True)
 def generate_layout(payload: LayoutRequest) -> LayoutResponse:
     """Hybrid AI planner: rule-based always; LLM when XAI_API_KEY is set.
 

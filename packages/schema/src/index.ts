@@ -71,15 +71,15 @@ export type OpType = z.infer<typeof OpTypeSchema>;
 /** Prefer ADD_OBJECT with optional productId (ADD_PRODUCT is not a separate op). */
 export const SceneOperationSchema = z.object({
   type: OpTypeSchema,
-  objectId: z.string().optional(),
-  targetPosition: Vector3Schema.optional(),
-  targetRotation: QuaternionSchema.optional(),
-  assetId: z.string().optional(),
-  productId: z.string().optional(),
-  objectType: z.string().optional(),
-  dimensions: DimensionsSchema.optional(),
-  movable: z.boolean().optional(),
-  source: z.enum(['existing', 'catalog']).optional()
+  objectId: z.string().nullish(),
+  targetPosition: Vector3Schema.nullish(),
+  targetRotation: QuaternionSchema.nullish(),
+  assetId: z.string().nullish(),
+  productId: z.string().nullish(),
+  objectType: z.string().nullish(),
+  dimensions: DimensionsSchema.nullish(),
+  movable: z.boolean().nullish(),
+  source: z.enum(['existing', 'catalog']).nullish()
 });
 export type SceneOperation = z.infer<typeof SceneOperationSchema>;
 
@@ -134,16 +134,16 @@ export const LayoutResponseSchema = z.object({
     .array(
       z.object({
         productId: z.string(),
-        name: z.string().optional(),
+        name: z.string().nullish(),
         score: z.number(),
         reason: z.string(),
-        objectId: z.string().optional(),
-        replacedProductId: z.string().optional(),
-        rating: z.number().optional(),
-        price: z.number().optional()
+        objectId: z.string().nullish(),
+        replacedProductId: z.string().nullish(),
+        rating: z.number().nullish(),
+        price: z.number().nullish()
       })
     )
-    .optional()
+    .nullish()
 });
 export type LayoutResponse = z.infer<typeof LayoutResponseSchema>;
 
@@ -186,7 +186,7 @@ export const PresenceUserSchema = z.object({
 });
 export type PresenceUser = z.infer<typeof PresenceUserSchema>;
 
-/** Spatial annotation polyline in Y-up meters (wall / floor / free). */
+/** Spatial annotation polyline in Y-up meters (free-space / wall / floor). Prefer plane: "free". */
 export const DrawingStrokeSchema = z.object({
   strokeId: z.string(),
   sceneId: z.string(),
