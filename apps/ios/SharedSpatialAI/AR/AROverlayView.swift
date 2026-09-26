@@ -70,7 +70,8 @@ struct ARViewContainer: UIViewRepresentable {
         var renderedStrokeCount = -1
         var renderedGhostCount = -1
         private var draftPoints: [Vector3] = []
-        private var draftEntity: Entity?
+        // Internal: accessed from ARViewContainer.rebuild (nested private is not visible there).
+        var draftEntity: Entity?
 
         init(parent: ARViewContainer) {
             self.parent = parent

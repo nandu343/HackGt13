@@ -7,10 +7,11 @@
     "packages/*"
   ],
   "scripts": {
+    "setup": "node scripts/setup.mjs",
     "dev": "concurrently -n web,api -c cyan,magenta \"npm run dev:web\" \"npm run dev:api\"",
     "dev:web": "npm --workspace apps/web run dev",
     "build:web": "npm --workspace apps/web run build",
-    "dev:api": "py -3.12 -m uvicorn app.main:app --reload --app-dir apps/api --host 127.0.0.1 --port 8000",
+    "dev:api": "node scripts/run-api.mjs",
     "lint:web": "npm --workspace apps/web run lint"
   },
   "devDependencies": {

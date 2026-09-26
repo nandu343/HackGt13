@@ -37,8 +37,8 @@ Mesh voice may degrade at high N (WebRTC is O(n²)); joins are still allowed.
 ### Prerequisites
 
 - Node 20+
-- Python 3.11+ (3.12 OK)
-- Optional: copy `.env.example` → `.env` at repo root
+- Python 3.11+ (3.12 OK) — `python3` on Mac/Linux, `py -3` / `python` on Windows
+- Optional: copy `.env.example` → `.env` at repo root (API loads it automatically)
 
 ### Env vars
 
@@ -53,20 +53,21 @@ Mesh voice may degrade at high N (WebRTC is O(n²)); joins are still allowed.
 | `LOCK_TTL_SECONDS` | api | `30` | Soft-lock TTL for collaborative edits |
 | `SCENE_STORE` | api | `memory` | `supabase` when using Postgres persistence |
 
-See `.env.example` for Supabase optional keys. iOS API URL / scene id: **Settings in-app** or **[apps/ios/README.md](apps/ios/README.md)** — do not duplicate device LAN setup here.
+See `.env.example` for Supabase optional keys. iOS API URL / scene id: **Settings in-app** or **[apps/ios/README.md](apps/ios/README.md)**.
 
-### Install
+### Mac / Windows — setup + run
 
 ```bash
+cd HackGt13
 npm install
-py -3.12 -m pip install -r apps/api/requirements.txt
-```
-
-### Run both (recommended)
-
-```bash
+npm run setup
 npm run dev
 ```
+
+`npm run setup` installs npm workspaces and `apps/api/requirements.txt` (detects `python3` / `py -3.12` / `python`).  
+`npm run dev` starts web + API together. `npm run dev:api` uses `scripts/run-api.mjs` (finds Python, auto-installs FastAPI if missing, binds `0.0.0.0:8000` with cwd `apps/api` so `app` always imports).
+
+Mac shorthand: `make setup && make dev` or `./scripts/dev.sh`.
 
 - Web: [http://localhost:3000](http://localhost:3000)
 - API: [http://localhost:8000/health](http://localhost:8000/health)
@@ -79,24 +80,15 @@ npm run dev:api
 npm run dev:web
 ```
 
-API equivalent:
-
-```bash
-py -3.12 -m uvicorn app.main:app --reload --app-dir apps/api --host 0.0.0.0 --port 8000
-```
-
-Use `--host 0.0.0.0` when syncing from a physical iOS device.
-
 ### iOS (3rd client)
 
-See **[apps/ios/README.md](apps/ios/README.md)**. On a Mac:
+API already binds `--host 0.0.0.0` via `npm run dev:api`. On a physical device, set the **Mac LAN IP** in the app (Settings) or `APIConfig.swift` — see **[apps/ios/README.md](apps/ios/README.md)**.
 
 ```bash
 open apps/ios/SharedSpatialAI.xcodeproj
 ```
 
 **Simulator:** Scan gate → **Use demo room** → map twin + Draw in space + Plan. **LiDAR device:** RoomPlan → **Live AR** (camera passthrough) with furniture overlays + free-space sketch. Same `scene_party_001` / Y-up meters as the web twin.
-
 ---
 
 ## Demo loop

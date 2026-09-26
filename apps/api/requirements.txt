@@ -1,11 +1,13 @@
+# Core API (install: npm run setup  OR  python -m pip install -r apps/api/requirements.txt)
 fastapi==0.115.0
 uvicorn[standard]==0.30.6
-websockets>=12.0
 pydantic==2.9.2
 python-dotenv==1.0.1
-# Optional — hybrid xAI Grok LLM planner (Phase 3); OpenAI-compatible client
-# openai>=1.40.0
-# Optional — Stripe test-mode checkout (Phase 4)
+websockets>=12.0
+# Hybrid xAI Grok LLM planner (OpenAI-compatible client)
+openai>=1.40.0
+
+# Optional — Stripe test-mode checkout (Phase 4); imported only when STRIPE_SECRET_KEY is set
 # stripe>=10.0.0
 # Optional — only needed when SCENE_STORE=supabase
 # supabase==2.7.4

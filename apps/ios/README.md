@@ -30,10 +30,13 @@ cd apps/ios && xcodegen generate && open SharedSpatialAI.xcodeproj
 From the repo root (same API the web twin uses):
 
 ```bash
-py -3.12 -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000 --app-dir apps/api
+npm run setup   # once
+npm run dev:api # binds 0.0.0.0:8000 — required for a physical device
 ```
 
-`--host 0.0.0.0` is required so a **physical device** can reach your Mac.
+Or both web + API: `npm run dev`.
+
+`--host 0.0.0.0` is already set by `scripts/run-api.mjs` so a **physical device** can reach your Mac. Set the **LAN IP** in Settings (below).
 
 Default scene id: `scene_party_001`.
 
