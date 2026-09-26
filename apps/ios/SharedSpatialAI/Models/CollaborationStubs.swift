@@ -36,8 +36,9 @@ import Foundation
 //   Tap those entities in live camera AR to MOVE_OBJECT / DELETE_OBJECT;
 //   walls stay immovable. Mirrors web ObjectGizmo + SelectionBar behavior.
 //
-// Live AR: ARKit world-tracking ARView (camera passthrough) after RoomPlan scan.
+// Live AR: ARKit world-tracking ARView (camera passthrough) after camera or RoomPlan scan.
 //   Catalog / AI objects = anchors; strokes = world-space polylines. Map twin is secondary.
+//   LiDAR is optional — non-LiDAR devices use plane detection + standard world tracking.
 // Full AVAudioEngine / WebRTC iOS client is intentionally out of scope for this scaffold.
 
 struct PresenceUserDTO: Codable, Equatable, Sendable {

@@ -3,6 +3,7 @@ import SwiftUI
 import UIKit
 
 /// UIKit wrapper around RoomPlan's `RoomCaptureView` for SwiftUI.
+/// Only present when `RoomCaptureSession.isSupported` (LiDAR). Camera scan is the primary path.
 struct RoomCaptureRepresentable: UIViewControllerRepresentable {
     var onComplete: (CapturedRoom) -> Void
     var onCancel: () -> Void
@@ -21,7 +22,7 @@ final class RoomCaptureViewController: UIViewController, RoomCaptureViewDelegate
     var onComplete: ((CapturedRoom) -> Void)?
     var onCancel: (() -> Void)?
 
-    private var captureView: RoomCaptureView!
+    private var captureView: RoomCaptureView?
     private var isSessionRunning = false
     private var finalResults: CapturedRoom?
 
@@ -29,10 +30,38 @@ final class RoomCaptureViewController: UIViewController, RoomCaptureViewDelegate
         super.viewDidLoad()
         view.backgroundColor = .black
 
-        captureView = RoomCaptureView(frame: view.bounds)
-        captureView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        captureView.delegate = self
-        view.addSubview(captureView)
+        // Never construct RoomCaptureView on non-LiDAR devices — it can crash.
+        guard RoomCaptureSession.isSupported else {
+            let label = UILabel()
+            label.text = "Detailed scan requires LiDAR.\nUse Scan with camera instead."
+            label.textColor = .white
+            label.textAlignment = .center
+            label.numberOfLines = 0
+            label.translatesAutoresizingMaskIntoConstraints = false
+            view.addSubview(label)
+            NSLayoutConstraint.activate([
+                label.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+                label.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+                label.leadingAnchor.constraint(greaterThanOrEqualTo: view.leadingAnchor, constant: 24),
+                label.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -24)
+            ])
+            let close = UIButton(type: .system)
+            close.setTitle("Close", for: .normal)
+            close.addTarget(self, action: #selector(cancelTapped), for: .touchUpInside)
+            close.translatesAutoresizingMaskIntoConstraints = false
+            view.addSubview(close)
+            NSLayoutConstraint.activate([
+                close.topAnchor.constraint(equalTo: label.bottomAnchor, constant: 16),
+                close.centerXAnchor.constraint(equalTo: view.centerXAnchor)
+            ])
+            return
+        }
+
+        let capture = RoomCaptureView(frame: view.bounds)
+        capture.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        capture.delegate = self
+        view.addSubview(capture)
+        captureView = capture
 
         let bar = UIToolbar()
         bar.translatesAutoresizingMaskIntoConstraints = false
@@ -59,6 +88,7 @@ final class RoomCaptureViewController: UIViewController, RoomCaptureViewDelegate
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        guard RoomCaptureSession.isSupported else { return }
         startSession()
     }
 
@@ -68,14 +98,14 @@ final class RoomCaptureViewController: UIViewController, RoomCaptureViewDelegate
     }
 
     private func startSession() {
-        guard !isSessionRunning else { return }
+        guard !isSessionRunning, let captureView else { return }
         let config = RoomCaptureSession.Configuration()
         captureView.captureSession.run(configuration: config)
         isSessionRunning = true
     }
 
     private func stopSession() {
-        guard isSessionRunning else { return }
+        guard isSessionRunning, let captureView else { return }
         captureView.captureSession.stop()
         isSessionRunning = false
     }

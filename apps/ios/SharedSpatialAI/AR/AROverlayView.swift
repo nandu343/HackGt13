@@ -5,6 +5,7 @@ import UIKit
 
 #if !targetEnvironment(simulator)
 /// Live camera ARView (Pokémon GO–style): world-tracking passthrough with shared scene overlays.
+/// Works on any ARKit world-tracking device — LiDAR mesh is optional enhancement only.
 /// Finger drag in draw mode places free-space 3D polylines (Y-up meters) synced via WS.
 struct ARViewContainer: UIViewRepresentable {
     let scene: SceneDTO?
@@ -19,6 +20,7 @@ struct ARViewContainer: UIViewRepresentable {
         let view = ARView(frame: .zero)
         let config = ARWorldTrackingConfiguration()
         config.planeDetection = [.horizontal, .vertical]
+        // LiDAR-only APIs: enable mesh only when the device supports it.
         if ARWorldTrackingConfiguration.supportsSceneReconstruction(.mesh) {
             config.sceneReconstruction = .mesh
         }

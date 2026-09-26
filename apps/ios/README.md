@@ -1,8 +1,10 @@
-# Shared Spatial AI — iOS (RoomPlan / Live Camera AR)
+# Shared Spatial AI — iOS (Camera scan / optional RoomPlan / Live Camera AR)
 
 Working client that proves **one scene graph, two renderers**: this app and the web twin both talk to the same FastAPI scene API.
 
 **Product flow:** **Scan room first → Live Camera AR** (Pokémon GO–style: real room + overlays) → **Plan / Invite / Draw in space.**
+
+**LiDAR is optional.** Any ARKit world-tracking iPhone can **Scan with camera** (plane detection) and use **Live AR**. RoomPlan is a secondary “Detailed scan (LiDAR)” path when `RoomCaptureSession.isSupported`.
 
 ## Open in Xcode
 
@@ -12,8 +14,18 @@ Working client that proves **one scene graph, two renderers**: this app and the 
    ```
 2. Select the **SharedSpatialAI** target → **Signing & Capabilities** → choose your Team (required for device).
 3. Pick a run destination:
-   - **iOS Simulator** — scan-first gate + demo room export + RealityKit **map** (no live camera / no RoomPlan).
-   - **Physical iPhone/iPad with LiDAR** — RoomPlan capture → **Live AR** camera passthrough with shared overlays.
+   - **iOS Simulator** — scan-first gate + demo room export + RealityKit **map** (no live camera).
+   - **Any physical iPhone/iPad with ARKit** — **Scan with camera** → **Live AR** (no LiDAR required).
+   - **LiDAR device (optional)** — also offers **Detailed scan (LiDAR)** via RoomPlan for richer walls/furniture.
+
+### Try on a non-LiDAR iPhone
+
+1. Start the API from the repo root (`npm run setup` once, then `npm run dev:api` so it binds `0.0.0.0:8000`).
+2. Open `apps/ios/SharedSpatialAI.xcodeproj` in Xcode, set your Team, select your non-LiDAR iPhone.
+3. In-app **Settings** → set Base URL to `http://<your-mac-lan-ip>:8000`.
+4. On the launch gate tap **Scan with camera** (primary CTA). Walk the room until cyan floor / purple wall planes appear; optionally tap the floor to mark corners; tap **Finish scan**.
+5. App POSTs the Scene JSON and opens **Live AR** — place/move objects, **Draw in space**, **Plan**, **Invite** work without LiDAR.
+6. **Detailed scan (LiDAR)** stays hidden or unused on non-LiDAR phones; **Use demo room** remains available.
 
 ### If the `.xcodeproj` fails to open
 
@@ -56,9 +68,9 @@ Or edit `SharedSpatialAI/Networking/APIConfig.swift` / set env `SHARED_SPATIAL_A
 ## Flow (Scan → Live AR → Plan / Invite / Draw)
 
 ```text
-Scan room (RoomPlan) or Use demo room
+Scan with camera (primary)  or  Detailed scan LiDAR (optional)  or  Demo room
         ↓  POST /scene
-   Live AR (ARKit camera passthrough)
+   Live AR (ARWorldTrackingConfiguration — no LiDAR mesh required)
         ├── Draw in space → WS draw_stroke (free 3D polylines)
         ├── Plan sheet → POST /ai/layout → ops
         ├── Invite → POST …/invites → share web ?scene=&invite=
@@ -67,7 +79,7 @@ Scan room (RoomPlan) or Use demo room
 
 | Screen | Role |
 |--------|------|
-| **Scan** (launch) | Big **Scan room** (device) or **Use demo room** (simulator). Secondary: load existing map from API. Settings gear for API URL. |
+| **Scan** (launch) | Primary **Scan with camera**; secondary **Detailed scan (LiDAR)** if supported; **Use demo room**; load existing map. |
 | **Live AR** | Camera shows the real room; furniture / ghosts / strokes overlay in world space. **Draw in space**, **Plan**, **Invite**. Toggle **Map** for a non-AR twin. |
 | **Plan** | Same hybrid `/ai/layout` as web → Accept applies ops. |
 | **Invite** | Creates API invite; share link opens web on the **same `sceneId`**. |
@@ -78,14 +90,14 @@ Scan room (RoomPlan) or Use demo room
 2. Open this Xcode project; run on Simulator.
 3. Launch lands on **Scan** → **Use demo room** → auto-opens map + **Plan** sheet.
 4. Accept AI ops (or Close) → tap an object → move / remove → **Draw in space** → **Invite** and open the link on localhost web.
-5. On device: **Scan room** (RoomPlan) → **Live AR** with camera passthrough + free-space sketch.
+5. On any ARKit device: **Scan with camera** → **Live AR** with camera passthrough + free-space sketch.
 
 ---
 
 ## Sync loop with the web twin
 
 ```text
-iOS RoomPlan / demo export ──POST /scene──► FastAPI SceneStore
+iOS camera / RoomPlan / demo export ──POST /scene──► FastAPI SceneStore
 iOS Plan sheet ──POST /ai/layout──► ops ──POST …/operations──┤
 iOS Draw in space ──WS draw_stroke──────────────────────────┤
                                               │
@@ -104,7 +116,7 @@ Documented in `Models/Coordinates.swift` and schema:
 - **Units:** meters  
 - **Up:** +Y  
 - **Origin:** floor center of the room  
-- RoomPlan matrices are recentered in `RoomPlanExporter` before upload  
+- Camera-scan and RoomPlan matrices are recentered before upload  
 
 ## Collaboration (voice + free-space drawing)
 
@@ -126,27 +138,28 @@ Web shares `/?scene={sceneId}&invite={token}`. iOS **Invite** creates the token 
 
 ### Existing furniture
 
-RoomPlan export marks scanned furniture `source: "existing"` and `movable: true`; walls are fixed. Tap in Live AR → move / remove (same ops as web).
+RoomPlan / camera-scan exports mark scanned surfaces `source: "existing"`; walls are fixed. Tap in Live AR → move / remove (same ops as web).
 
 ---
 
 ## Device vs Simulator
 
-| Capability | Simulator | LiDAR device |
-|------------|-----------|--------------|
-| Scan-first gate | Yes (demo CTA) | Yes (RoomPlan primary) |
-| Demo / load map → AR | Yes (map twin) | Yes (Live camera AR) |
-| Plan → `/ai/layout` | Yes | Yes |
-| Live RoomPlan capture | No | Yes (LiDAR) |
-| Camera passthrough AR | No | Yes |
-| Draw in space + WS | Yes (map ray) | Yes (camera ray) |
+| Capability | Simulator | Non-LiDAR device | LiDAR device |
+|------------|-----------|------------------|--------------|
+| Scan-first gate | Yes (demo CTA) | Yes (camera primary) | Yes (camera + RoomPlan) |
+| Camera plane scan | No | Yes | Yes |
+| Detailed RoomPlan | No | No (hidden) | Yes (optional) |
+| Demo / load map → AR | Yes (map twin) | Yes (Live camera AR) | Yes |
+| Plan → `/ai/layout` | Yes | Yes | Yes |
+| Camera passthrough AR | No | Yes | Yes |
+| Draw in space + WS | Yes (map ray) | Yes (camera ray) | Yes |
 
 ## API surface used
 
 | Method | Path | Purpose |
 |--------|------|---------|
 | `GET` | `/scene/{sceneId}` | Pull shared graph |
-| `POST` | `/scene` | Upsert full normalized scene (RoomPlan export) |
+| `POST` | `/scene` | Upsert full normalized scene (scan / demo export) |
 | `PUT` | `/scene/{sceneId}` | Same upsert by path |
 | `POST` | `/scene/{sceneId}/operations` | Validated ops |
 | `POST` | `/scene/{sceneId}/invites` | Shareable invite token |
@@ -164,8 +177,8 @@ apps/ios/
     ├── App/           # Scan-first RootFlowView
     ├── Models/
     ├── Networking/    # API + SceneSyncStore + SceneWebSocket
-    ├── RoomPlan/      # Capture + Plan + Invite
+    ├── RoomPlan/      # Optional LiDAR capture + Plan + Invite
     ├── Viewer/        # Live AR / map twin UI
-    ├── AR/            # Device ARViewContainer (camera AR)
+    ├── AR/            # Camera scan + device ARViewContainer
     └── Resources/
 ```

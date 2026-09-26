@@ -7,8 +7,8 @@ import simd
 /// - Origin: **floor center** of the room (XZ plane on the floor; Y = 0 is floor)
 /// - Right-handed; +Z toward "back" of room is conventional for web twin (Three.js)
 ///
-/// RoomPlan / ARKit use a device-relative world. Exporters recenter so the
-/// captured floor AABB center maps to (0, 0, 0) in shared space.
+/// RoomPlan / ARKit use a device-relative world. Exporters (camera scan + RoomPlan)
+/// recenter so the captured floor AABB center maps to (0, 0, 0) in shared space.
 enum Coordinates {
     static let identityQuaternion = Quaternion.identity
 

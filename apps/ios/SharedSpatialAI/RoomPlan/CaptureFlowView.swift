@@ -1,12 +1,39 @@
+import RoomPlan
 import SwiftUI
 
-/// Launch gate: scan the room (or demo export) before planning in AR.
+#if !targetEnvironment(simulator)
+import ARKit
+#endif
+
+/// Feature flags for scan paths. RoomPlan / LiDAR is optional — never a hard blocker.
+enum ScanCapabilities {
+    /// True when RoomPlan capture is available (typically LiDAR devices).
+    static var supportsDetailedRoomPlan: Bool {
+        #if targetEnvironment(simulator)
+        return false
+        #else
+        return RoomCaptureSession.isSupported
+        #endif
+    }
+
+    /// Any physical device with ARKit world tracking can do camera plane scan + Live AR.
+    static var supportsCameraScan: Bool {
+        #if targetEnvironment(simulator)
+        return false
+        #else
+        return ARWorldTrackingConfiguration.isSupported
+        #endif
+    }
+}
+
+/// Launch gate: scan the room (camera primary, RoomPlan optional) or demo before planning in AR.
 struct CaptureFlowView: View {
     @Environment(SceneSyncStore.self) private var store
     var onRoomReady: () -> Void
     var onOpenSettings: () -> Void
 
-    @State private var showCapture = false
+    @State private var showCameraScan = false
+    @State private var showRoomPlan = false
     @State private var lastExportSummary: String?
 
     var body: some View {
@@ -56,18 +83,35 @@ struct CaptureFlowView: View {
                         .controlSize(.large)
                         .disabled(store.isBusy)
                         #else
-                        Button {
-                            showCapture = true
-                        } label: {
-                            labelRow(
-                                title: "Scan room",
-                                subtitle: "RoomPlan · LiDAR capture",
-                                systemImage: "camera.viewfinder"
-                            )
+                        if ScanCapabilities.supportsCameraScan {
+                            Button {
+                                showCameraScan = true
+                            } label: {
+                                labelRow(
+                                    title: "Scan with camera",
+                                    subtitle: "ARKit planes · works without LiDAR",
+                                    systemImage: "camera.viewfinder"
+                                )
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.large)
+                            .disabled(store.isBusy)
                         }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.large)
-                        .disabled(store.isBusy)
+
+                        if ScanCapabilities.supportsDetailedRoomPlan {
+                            Button {
+                                showRoomPlan = true
+                            } label: {
+                                labelRow(
+                                    title: "Detailed scan (LiDAR)",
+                                    subtitle: "RoomPlan · richer walls & furniture",
+                                    systemImage: "cube.transparent"
+                                )
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.large)
+                            .disabled(store.isBusy)
+                        }
 
                         Button {
                             Task { await exportDemo() }
@@ -110,33 +154,49 @@ struct CaptureFlowView: View {
                     }
                 }
             }
-            .fullScreenCover(isPresented: $showCapture) {
+            .fullScreenCover(isPresented: $showCameraScan) {
                 #if !targetEnvironment(simulator)
-                RoomCaptureRepresentable(
-                    onComplete: { captured in
-                        showCapture = false
-                        let scene = RoomPlanExporter.export(
-                            captured: captured,
-                            sceneId: store.sceneId
-                        )
-                        lastExportSummary =
-                            "Captured \(scene.objects.count) objects · "
-                            + String(
-                                format: "%.1f×%.1f×%.1f m",
-                                scene.bounds.width,
-                                scene.bounds.length,
-                                scene.bounds.height
-                            )
-                        Task {
-                            await store.uploadScene(scene)
-                            if store.lastError == nil {
-                                onRoomReady()
-                            }
-                        }
+                CameraRoomScanView(
+                    sceneId: store.sceneId,
+                    onComplete: { scene in
+                        showCameraScan = false
+                        applyExportedScene(scene, label: "Camera scan")
                     },
-                    onCancel: { showCapture = false }
+                    onCancel: { showCameraScan = false }
                 )
                 .ignoresSafeArea()
+                #else
+                Text("Camera scan requires a physical device")
+                    .padding()
+                #endif
+            }
+            .fullScreenCover(isPresented: $showRoomPlan) {
+                #if !targetEnvironment(simulator)
+                if ScanCapabilities.supportsDetailedRoomPlan {
+                    RoomCaptureRepresentable(
+                        onComplete: { captured in
+                            showRoomPlan = false
+                            let scene = RoomPlanExporter.export(
+                                captured: captured,
+                                sceneId: store.sceneId
+                            )
+                            applyExportedScene(scene, label: "RoomPlan")
+                        },
+                        onCancel: { showRoomPlan = false }
+                    )
+                    .ignoresSafeArea()
+                } else {
+                    VStack(spacing: 12) {
+                        Text("Detailed scan needs LiDAR")
+                            .font(.headline)
+                        Text("Use Scan with camera instead — Live AR works without LiDAR.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                        Button("Close") { showRoomPlan = false }
+                    }
+                    .padding()
+                }
                 #else
                 Text("RoomPlan requires a physical device")
                     .padding()
@@ -162,7 +222,7 @@ struct CaptureFlowView: View {
                     .foregroundStyle(.red)
             }
             if store.scene == nil && store.lastError == nil {
-                Text("No room map yet — scan, use demo, or load from API.")
+                Text("No room map yet — scan with camera, use demo, or load from API.")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }
@@ -180,6 +240,23 @@ struct CaptureFlowView: View {
             Image(systemName: systemImage)
         }
         .padding(.vertical, 4)
+    }
+
+    private func applyExportedScene(_ scene: SceneDTO, label: String) {
+        lastExportSummary =
+            "\(label): \(scene.objects.count) objects · "
+            + String(
+                format: "%.1f×%.1f×%.1f m",
+                scene.bounds.width,
+                scene.bounds.length,
+                scene.bounds.height
+            )
+        Task {
+            await store.uploadScene(scene)
+            if store.lastError == nil {
+                onRoomReady()
+            }
+        }
     }
 
     private func exportDemo() async {
