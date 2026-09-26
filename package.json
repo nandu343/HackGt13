@@ -1,0 +1,15 @@
+{
+  "name": "shared-spatial-ai",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:web": "npm --workspace apps/web run dev",
+    "build:web": "npm --workspace apps/web run build",
+    "dev:api": "python -m uvicorn app.main:app --reload --app-dir apps/api",
+    "lint:web": "npm --workspace apps/web run lint"
+  }
+}
