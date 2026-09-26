@@ -23,6 +23,8 @@
 		B1000E /* RealityKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F1000E /* RealityKit.framework */; };
 		B1000F /* ARKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F1000F /* ARKit.framework */; };
 		B10011 /* CollaborationStubs.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10011 /* CollaborationStubs.swift */; };
+		B10012 /* LayoutModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10012 /* LayoutModels.swift */; };
+		B10013 /* PlanRoomSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10013 /* PlanRoomSheet.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -43,6 +45,8 @@
 		F1000F /* ARKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = ARKit.framework; path = System/Library/Frameworks/ARKit.framework; sourceTree = SDKROOT; };
 		F10010 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		F10011 /* CollaborationStubs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CollaborationStubs.swift; sourceTree = "<group>"; };
+		F10012 /* LayoutModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LayoutModels.swift; sourceTree = "<group>"; };
+		F10013 /* PlanRoomSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanRoomSheet.swift; sourceTree = "<group>"; };
 		P10001 /* SharedSpatialAI.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SharedSpatialAI.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -97,6 +101,7 @@
 				F10002 /* SceneModels.swift */,
 				F10003 /* Coordinates.swift */,
 				F10011 /* CollaborationStubs.swift */,
+				F10012 /* LayoutModels.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -117,6 +122,7 @@
 				F10007 /* RoomPlanExporter.swift */,
 				F10008 /* RoomCaptureViewController.swift */,
 				F10009 /* CaptureFlowView.swift */,
+				F10013 /* PlanRoomSheet.swift */,
 			);
 			path = RoomPlan;
 			sourceTree = "<group>";
@@ -243,8 +249,10 @@
 				B10007 /* RoomPlanExporter.swift in Sources */,
 				B10008 /* RoomCaptureViewController.swift in Sources */,
 				B10009 /* CaptureFlowView.swift in Sources */,
+				B10013 /* PlanRoomSheet.swift in Sources */,
 				B1000A /* SceneViewerView.swift in Sources */,
 				B1000B /* AROverlayView.swift in Sources */,
+				B10012 /* LayoutModels.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

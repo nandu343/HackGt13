@@ -69,4 +69,43 @@ final class SceneSyncStore {
             await refresh()
         }
     }
+
+    /// Call hybrid `/ai/layout` then apply returned ops into the shared scene (AR / web twin).
+    @discardableResult
+    func planAndApply(
+        prompt: String,
+        guestCount: Int,
+        budget: Double
+    ) async -> LayoutResponseDTO? {
+        guard scene != nil else {
+            lastError = "No scene loaded — export or refresh first"
+            return nil
+        }
+        lastError = nil
+        isBusy = true
+        let layout: LayoutResponseDTO
+        do {
+            layout = try await APIClient.shared.postAiLayout(
+                LayoutRequestDTO(
+                    sceneId: sceneId,
+                    prompt: prompt,
+                    guestCount: guestCount,
+                    budget: budget
+                )
+            )
+            statusMessage = "AI \(layout.plannerMode ?? "rules"): \(layout.scenario) · \(layout.operations.count) ops"
+        } catch {
+            lastError = error.localizedDescription
+            statusMessage = "AI layout failed"
+            isBusy = false
+            return nil
+        }
+        isBusy = false
+        guard !layout.operations.isEmpty else {
+            lastError = "No valid ops — try a different prompt"
+            return layout
+        }
+        await pushOps(layout.operations)
+        return layout
+    }
 }

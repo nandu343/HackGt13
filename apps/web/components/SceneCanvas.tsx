@@ -1,16 +1,107 @@
 'use client';
 
-import { Suspense, useMemo, useRef, useState } from 'react';
-import { Canvas, type ThreeEvent, useThree } from '@react-three/fiber';
+import { Suspense, useMemo, useRef, useState, type RefObject } from 'react';
+import { Canvas, type ThreeEvent, useFrame, useThree } from '@react-three/fiber';
 import { ContactShadows, Line, OrbitControls } from '@react-three/drei';
+import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 import * as THREE from 'three';
 import type {
   DrawingStroke,
+  PresenceUser,
   RoomBounds,
   SceneObject,
   Vector3
 } from '@shared-spatial-ai/schema';
+import { GhostAvatars } from './GhostAvatars';
 import { ObjectGizmo } from './ObjectGizmo';
+
+/** Semi-transparent dual-tint layout ghosts (disagreement A/B). */
+function GhostLayoutObjects({
+  objects,
+  tint,
+  offsetX = 0
+}: {
+  objects: SceneObject[];
+  tint: string;
+  offsetX?: number;
+}) {
+  return (
+    <group position={[offsetX, 0, 0]}>
+      {objects.map((obj) => {
+        const dims = obj.dimensions;
+        const w = dims?.width ?? 0.6;
+        const h = dims?.height ?? 0.6;
+        const d = dims?.depth ?? 0.6;
+        const [px, py, pz] = obj.transform.position;
+        const [rx, ry, rz, rw] = obj.transform.rotation;
+        return (
+          <mesh
+            key={`ghost-${tint}-${obj.id}`}
+            position={[px, py, pz]}
+            quaternion={[rx, ry, rz, rw]}
+          >
+            <boxGeometry args={[w, Math.max(h, 0.02), d]} />
+            <meshStandardMaterial
+              color={tint}
+              transparent
+              opacity={0.32}
+              depthWrite={false}
+              roughness={0.4}
+              metalness={0.05}
+              emissive={tint}
+              emissiveIntensity={0.25}
+            />
+          </mesh>
+        );
+      })}
+    </group>
+  );
+}
+
+/** Push orbit focus + look dir onto the presence channel (throttled). */
+function PresencePoseBroadcaster({
+  controlsRef,
+  onPose
+}: {
+  controlsRef: RefObject<OrbitControlsImpl | null>;
+  onPose?: (position: Vector3, lookDirection: Vector3) => void;
+}) {
+  const { camera } = useThree();
+  const lastSent = useRef(0);
+  const lastPos = useRef(new THREE.Vector3(NaN, NaN, NaN));
+  const look = useRef(new THREE.Vector3());
+  const ghostPos = useRef(new THREE.Vector3());
+
+  useFrame(() => {
+    if (!onPose) return;
+    const controls = controlsRef.current;
+    if (!controls) return;
+    const now = performance.now();
+    if (now - lastSent.current < 120) return;
+
+    // Ghost stands above the orbit focus (where the user is "looking at")
+    ghostPos.current.set(
+      controls.target.x,
+      Math.max(0.55, controls.target.y + 0.55),
+      controls.target.z
+    );
+    camera.getWorldDirection(look.current);
+
+    const moved =
+      !Number.isFinite(lastPos.current.x) ||
+      ghostPos.current.distanceToSquared(lastPos.current) > 0.0025;
+    if (!moved && now - lastSent.current < 900) return;
+
+    lastSent.current = now;
+    lastPos.current.copy(ghostPos.current);
+    onPose(
+      [ghostPos.current.x, ghostPos.current.y, ghostPos.current.z],
+      [look.current.x, look.current.y, look.current.z]
+    );
+  });
+
+  return null;
+}
 
 function RoomShell({ bounds }: { bounds: RoomBounds }) {
   const { width, length, height } = bounds;
@@ -157,6 +248,12 @@ type Props = {
   strokes?: DrawingStroke[];
   drawColor?: string;
   onStrokeComplete?: (points: Vector3[], plane: 'wall') => void;
+  presence?: PresenceUser[];
+  localUserId?: string;
+  onPresencePose?: (position: Vector3, lookDirection: Vector3) => void;
+  ghostObjectsA?: SceneObject[];
+  ghostObjectsB?: SceneObject[];
+  ghostMode?: 'overlay' | 'side';
 };
 
 export function SceneCanvas({
@@ -170,10 +267,18 @@ export function SceneCanvas({
   drawMode = false,
   strokes = [],
   drawColor = '#e2b45c',
-  onStrokeComplete
+  onStrokeComplete,
+  presence = [],
+  localUserId = '',
+  onPresencePose,
+  ghostObjectsA = [],
+  ghostObjectsB = [],
+  ghostMode = 'overlay'
 }: Props) {
   const [dragging, setDragging] = useState(false);
   const strokeList = useMemo(() => strokes, [strokes]);
+  const controlsRef = useRef<OrbitControlsImpl | null>(null);
+  const sideOffset = ghostMode === 'side' ? Math.max(bounds.width * 0.55, 2.2) : 0;
 
   return (
     <div className={`scene-canvas ${drawMode ? 'draw-mode' : ''}`}>
@@ -225,6 +330,23 @@ export function SceneCanvas({
               disabled={disabled || drawMode}
             />
           ))}
+          {ghostObjectsA.length > 0 && (
+            <GhostLayoutObjects
+              objects={ghostObjectsA}
+              tint="#3db8e8"
+              offsetX={-sideOffset}
+            />
+          )}
+          {ghostObjectsB.length > 0 && (
+            <GhostLayoutObjects
+              objects={ghostObjectsB}
+              tint="#e8a03d"
+              offsetX={sideOffset}
+            />
+          )}
+          {localUserId && (
+            <GhostAvatars presence={presence} localUserId={localUserId} />
+          )}
           <ContactShadows
             position={[0, 0.01, 0]}
             opacity={0.35}
@@ -233,7 +355,12 @@ export function SceneCanvas({
             far={6}
           />
         </Suspense>
+        <PresencePoseBroadcaster
+          controlsRef={controlsRef}
+          onPose={onPresencePose}
+        />
         <OrbitControls
+          ref={controlsRef}
           makeDefault
           enabled={!dragging && !drawMode}
           enablePan

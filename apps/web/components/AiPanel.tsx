@@ -14,7 +14,10 @@ export function AiPanel() {
     requestLayout,
     acceptLayout,
     rejectLayout,
-    isBusy
+    proposeDisagreement,
+    disagreement,
+    isBusy,
+    openIntentModal
   } = useSceneStore();
 
   const warnings = pendingLayout?.warnings ?? [];
@@ -22,10 +25,28 @@ export function AiPanel() {
   const fixedOps = pendingLayout?.fixedOps ?? 0;
   const canAccept = Boolean(pendingLayout?.operations.length);
   const plannerMode = pendingLayout?.plannerMode;
+  const valuePicks = pendingLayout?.valuePicks ?? [];
+  const bestValueIds = new Set(valuePicks.map((vp) => vp.productId));
+  const valueReasonById = new Map(valuePicks.map((vp) => [vp.productId, vp.reason]));
+  const proposeLabel = disagreement
+    ? disagreement.proposalB
+      ? 'Replace proposal B'
+      : 'Submit as proposal B'
+    : 'Propose (disagreement)';
 
   return (
     <section className="card panel-enter">
-      <h2>AI layout</h2>
+      <div className="panel-title-row">
+        <h2>AI layout</h2>
+        <button
+          type="button"
+          className="btn ghost compact"
+          onClick={openIntentModal}
+          disabled={isBusy}
+        >
+          Plan with friends
+        </button>
+      </div>
       <label className="field">
         <span>Prompt</span>
         <textarea
@@ -80,12 +101,33 @@ export function AiPanel() {
             ) : null}
           </p>
           <p className="ai-reasoning">{pendingLayout.reasoningSummary}</p>
+          {valuePicks.length > 0 && (
+            <ul className="value-pick-list">
+              {valuePicks.map((vp) => (
+                <li key={`${vp.objectId ?? ''}-${vp.productId}`}>
+                  <span className="value-badge">Best value pick</span>{' '}
+                  {vp.name ?? vp.productId}
+                  {vp.rating != null ? ` · ★${vp.rating.toFixed(1)}` : ''}
+                  {vp.price != null ? ` · $${vp.price.toFixed(0)}` : ''}
+                  <span className="value-reason">{vp.reason}</span>
+                </li>
+              ))}
+            </ul>
+          )}
           <ul className="op-list">
             {pendingLayout.operations.map((op, i) => (
               <li key={`${op.type}-${op.objectId ?? i}`}>
                 <code>{op.type}</code>
                 {op.objectId ? ` · ${op.objectId}` : ''}
                 {op.productId ? ` · ${op.productId}` : ''}
+                {op.productId && bestValueIds.has(op.productId) ? (
+                  <span
+                    className="value-badge inline"
+                    title={valueReasonById.get(op.productId)}
+                  >
+                    Best value pick
+                  </span>
+                ) : null}
               </li>
             ))}
           </ul>
@@ -112,6 +154,14 @@ export function AiPanel() {
               disabled={isBusy || !canAccept}
             >
               Accept
+            </button>
+            <button
+              type="button"
+              className="btn ghost"
+              onClick={() => void proposeDisagreement()}
+              disabled={isBusy || !canAccept}
+            >
+              {proposeLabel}
             </button>
             <button
               type="button"

@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from typing import Literal
 
 from .models import CatalogItem, Dimensions, RoomBounds, Scene, SceneObject, Transform
+
+QualityTier = Literal['budget', 'standard', 'premium']
 
 
 def _obj(
@@ -98,6 +101,8 @@ def _item(
     asset_id: str,
     tags: list[str],
     category: str,
+    rating: float,
+    quality_tier: QualityTier = 'standard',
     purchasable: bool = True,
     virtual_only: bool = False,
 ) -> CatalogItem:
@@ -109,13 +114,15 @@ def _item(
         asset_id=asset_id,
         tags=tags,
         category=category,
+        rating=rating,
+        quality_tier=quality_tier,
         purchasable=purchasable,
         virtual_only=virtual_only,
     )
 
 
 DEMO_CATALOG: list[CatalogItem] = [
-    # Seating
+    # Seating — folding chair is cheap but below "good" floor for demo junk filter
     _item(
         'product_sofa_01',
         'Lounge Sofa',
@@ -126,6 +133,8 @@ DEMO_CATALOG: list[CatalogItem] = [
         asset_id='asset_sofa_01',
         tags=['seating', 'living'],
         category='seating',
+        rating=4.6,
+        quality_tier='premium',
     ),
     _item(
         'chair_fold_01',
@@ -137,6 +146,8 @@ DEMO_CATALOG: list[CatalogItem] = [
         asset_id='asset_chair_fold_01',
         tags=['seating', 'party'],
         category='seating',
+        rating=3.2,
+        quality_tier='budget',
     ),
     _item(
         'chair_dining_02',
@@ -148,6 +159,8 @@ DEMO_CATALOG: list[CatalogItem] = [
         asset_id='asset_chair_dining_02',
         tags=['seating', 'dining'],
         category='seating',
+        rating=4.3,
+        quality_tier='standard',
     ),
     _item(
         'stool_bar_01',
@@ -159,6 +172,8 @@ DEMO_CATALOG: list[CatalogItem] = [
         asset_id='asset_stool_bar_01',
         tags=['seating', 'party'],
         category='seating',
+        rating=4.4,
+        quality_tier='standard',
     ),
     _item(
         'beanbag_01',
@@ -170,6 +185,8 @@ DEMO_CATALOG: list[CatalogItem] = [
         asset_id='asset_beanbag_01',
         tags=['seating', 'movie', 'party'],
         category='seating',
+        rating=4.1,
+        quality_tier='budget',
     ),
     # Tables / desks
     _item(
@@ -182,6 +199,8 @@ DEMO_CATALOG: list[CatalogItem] = [
         asset_id='asset_table_05',
         tags=['table', 'living'],
         category='tables',
+        rating=4.2,
+        quality_tier='standard',
     ),
     _item(
         'desk_study_01',
@@ -193,6 +212,8 @@ DEMO_CATALOG: list[CatalogItem] = [
         asset_id='asset_desk_study_01',
         tags=['desk', 'study', 'table'],
         category='tables',
+        rating=4.5,
+        quality_tier='standard',
     ),
     _item(
         'table_dining_01',
@@ -204,6 +225,8 @@ DEMO_CATALOG: list[CatalogItem] = [
         asset_id='asset_table_dining_01',
         tags=['table', 'dining'],
         category='tables',
+        rating=4.4,
+        quality_tier='premium',
     ),
     # Lighting
     _item(
@@ -216,6 +239,8 @@ DEMO_CATALOG: list[CatalogItem] = [
         asset_id='asset_lamp_12',
         tags=['lighting'],
         category='lighting',
+        rating=4.0,
+        quality_tier='standard',
     ),
     _item(
         'party_lights_03',
@@ -227,6 +252,8 @@ DEMO_CATALOG: list[CatalogItem] = [
         asset_id='asset_party_lights_03',
         tags=['party', 'lighting'],
         category='lighting',
+        rating=4.5,
+        quality_tier='budget',
     ),
     _item(
         'lamp_desk_01',
@@ -238,6 +265,8 @@ DEMO_CATALOG: list[CatalogItem] = [
         asset_id='asset_lamp_desk_01',
         tags=['lighting', 'study'],
         category='lighting',
+        rating=4.4,
+        quality_tier='standard',
     ),
     _item(
         'pendant_dinner_01',
@@ -249,6 +278,8 @@ DEMO_CATALOG: list[CatalogItem] = [
         asset_id='asset_pendant_dinner_01',
         tags=['lighting', 'dining'],
         category='lighting',
+        rating=4.3,
+        quality_tier='standard',
     ),
     # Decor / party / movie
     _item(
@@ -261,6 +292,8 @@ DEMO_CATALOG: list[CatalogItem] = [
         asset_id='asset_backdrop_12',
         tags=['party', 'decor', 'movie'],
         category='decor',
+        rating=4.2,
+        quality_tier='budget',
     ),
     _item(
         'plant_tall_02',
@@ -272,6 +305,8 @@ DEMO_CATALOG: list[CatalogItem] = [
         asset_id='asset_plant_tall_02',
         tags=['decor'],
         category='decor',
+        rating=4.0,
+        quality_tier='standard',
     ),
     _item(
         'rug_party_01',
@@ -283,6 +318,8 @@ DEMO_CATALOG: list[CatalogItem] = [
         asset_id='asset_rug_party_01',
         tags=['party', 'floor'],
         category='floor',
+        rating=4.1,
+        quality_tier='standard',
     ),
     _item(
         'projector_screen_01',
@@ -294,6 +331,8 @@ DEMO_CATALOG: list[CatalogItem] = [
         asset_id='asset_projector_screen_01',
         tags=['movie', 'decor'],
         category='decor',
+        rating=4.5,
+        quality_tier='standard',
     ),
     # Virtual-only (layout helpers, not checkout)
     _item(
@@ -306,6 +345,8 @@ DEMO_CATALOG: list[CatalogItem] = [
         asset_id='asset_virtual_marker_01',
         tags=['virtual', 'helper'],
         category='virtual',
+        rating=0.0,
+        quality_tier='budget',
         purchasable=False,
         virtual_only=True,
     ),
@@ -319,6 +360,8 @@ DEMO_CATALOG: list[CatalogItem] = [
         asset_id='asset_virtual_glow_orb',
         tags=['virtual', 'lighting', 'party'],
         category='virtual',
+        rating=0.0,
+        quality_tier='budget',
         purchasable=False,
         virtual_only=True,
     ),

@@ -5,11 +5,11 @@ import type { ConnectionStatus } from '../lib/sceneStore';
 import type { VoiceState } from '../lib/voiceMesh';
 
 const LABELS: Record<ConnectionStatus, string> = {
-  connecting: 'Connecting…',
-  connected: 'API connected',
-  disconnected: 'Disconnected',
-  error: 'Connection error',
-  syncing: 'Syncing…'
+  connecting: 'Connecting',
+  connected: 'Live',
+  disconnected: 'Offline',
+  error: 'Error',
+  syncing: 'Sync'
 };
 
 export function ConnectionStatusPill({
@@ -22,12 +22,10 @@ export function ConnectionStatusPill({
   presenceCount?: number;
 }) {
   const peers =
-    presenceCount != null && presenceCount > 0
-      ? ` · ${presenceCount} online`
-      : '';
+    presenceCount != null && presenceCount > 0 ? ` · ${presenceCount}` : '';
 
   return (
-    <div className={`status-pill status-${status}`} role="status">
+    <div className={`status-pill status-${status}`} role="status" title={LABELS[status]}>
       <span className="status-dot" aria-hidden />
       <span>
         {LABELS[status]}
@@ -38,6 +36,7 @@ export function ConnectionStatusPill({
   );
 }
 
+/** Compact presence + voice controls for the Voice drawer. */
 export function CollaborationBar({
   presence,
   actorId,
@@ -47,7 +46,8 @@ export function CollaborationBar({
   onToggleMute,
   onToggleDraw,
   onClearOwn,
-  onClearAll
+  onClearAll,
+  onInvite
 }: {
   presence: PresenceUser[];
   actorId: string;
@@ -58,6 +58,7 @@ export function CollaborationBar({
   onToggleDraw: () => void;
   onClearOwn: () => void;
   onClearAll: () => void;
+  onInvite?: () => void;
 }) {
   return (
     <div className="collab-bar">
@@ -102,8 +103,18 @@ export function CollaborationBar({
             </button>
           </>
         )}
+        {onInvite && (
+          <button
+            type="button"
+            className="btn accent compact"
+            onClick={onInvite}
+            title="Copy a shareable invite link"
+          >
+            Invite
+          </button>
+        )}
       </div>
-      {presence.length > 0 && (
+      {presence.length > 0 ? (
         <ul className="presence-list" aria-label="People in room">
           {presence.map((p) => {
             const isSelf = p.userId === actorId;
@@ -134,6 +145,8 @@ export function CollaborationBar({
             );
           })}
         </ul>
+      ) : (
+        <p className="presence-empty">No peers yet — invite with a link.</p>
       )}
     </div>
   );

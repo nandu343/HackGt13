@@ -8,6 +8,7 @@ from fastapi import HTTPException
 
 from .config import get_settings
 from .models import Scene, SceneObject, SoftLockResult
+from .validators import can_relocate
 
 
 def _parse_iso(value: str | None) -> datetime | None:
@@ -66,8 +67,11 @@ def acquire_lock(
     obj = next((o for o in scene.objects if o.id == object_id), None)
     if obj is None:
         raise HTTPException(status_code=404, detail=f'Object {object_id} not found')
-    if obj.movable is False:
-        raise HTTPException(status_code=400, detail='Cannot lock immovable object')
+    if not can_relocate(obj):
+        raise HTTPException(
+            status_code=400,
+            detail='Cannot lock structure (walls stay fixed)',
+        )
 
     holder = lock_holder(obj)
     if holder and holder != actor_id:

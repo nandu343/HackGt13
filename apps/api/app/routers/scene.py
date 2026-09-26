@@ -1,12 +1,24 @@
 from fastapi import APIRouter, HTTPException, Query
 
 from ..models import (
+    Disagreement,
+    DisagreementCompromiseRequest,
+    DisagreementCounterRequest,
+    DisagreementCreateRequest,
+    DisagreementResolveRequest,
     OperationEnvelope,
     OperationsResult,
     Scene,
+    SceneInvite,
+    SceneInviteCreateRequest,
+    SceneInviteList,
     SoftLockReleaseRequest,
     SoftLockRequest,
     SoftLockResult,
+    TimelineBranchRequest,
+    TimelineBranchResult,
+    TimelineList,
+    TimelineRestoreRequest,
 )
 from ..store import get_store
 
@@ -63,3 +75,96 @@ def unlock_object(scene_id: str, payload: SoftLockReleaseRequest) -> SoftLockRes
         object_id=payload.object_id,
         actor_id=payload.actor_id,
     )
+
+
+# --- Invites (unlimited peers via WS presence) ----------------------------
+
+
+@router.post('/{scene_id}/invites', response_model=SceneInvite, status_code=201)
+def create_invite(
+    scene_id: str, payload: SceneInviteCreateRequest | None = None
+) -> SceneInvite:
+    """Create a shareable invite token for this scene (no joiner cap)."""
+    return get_store().create_invite(scene_id, payload or SceneInviteCreateRequest())
+
+
+@router.get('/{scene_id}/invites', response_model=SceneInviteList)
+def list_invites(scene_id: str) -> SceneInviteList:
+    return get_store().list_invites(scene_id)
+
+
+@router.get('/{scene_id}/invites/default', response_model=SceneInvite)
+def default_invite(scene_id: str) -> SceneInvite:
+    """Ensure at least one invite exists and return it (demo convenience)."""
+    return get_store().ensure_default_invite(scene_id)
+
+
+# --- Timeline -------------------------------------------------------------
+
+
+@router.get('/{scene_id}/timeline', response_model=TimelineList)
+def get_timeline(
+    scene_id: str,
+    branch_id: str | None = Query(default=None, alias='branchId'),
+) -> TimelineList:
+    return get_store().get_timeline(scene_id, branch_id=branch_id)
+
+
+@router.post('/{scene_id}/timeline/restore', response_model=OperationsResult)
+def restore_timeline(scene_id: str, payload: TimelineRestoreRequest) -> OperationsResult:
+    return get_store().restore_timeline(scene_id, payload)
+
+
+@router.post('/{scene_id}/timeline/branch', response_model=TimelineBranchResult)
+def branch_timeline(scene_id: str, payload: TimelineBranchRequest) -> TimelineBranchResult:
+    return get_store().branch_timeline(scene_id, payload)
+
+
+# --- Disagreement ---------------------------------------------------------
+
+
+@router.get('/{scene_id}/disagreement', response_model=Disagreement | None)
+def get_disagreement(scene_id: str) -> Disagreement | None:
+    return get_store().get_disagreement(scene_id)
+
+
+@router.post('/{scene_id}/disagreement', response_model=Disagreement, status_code=201)
+def create_disagreement(
+    scene_id: str, payload: DisagreementCreateRequest
+) -> Disagreement:
+    return get_store().create_disagreement(scene_id, payload)
+
+
+@router.post(
+    '/{scene_id}/disagreement/{disagreement_id}/counter',
+    response_model=Disagreement,
+)
+def counter_disagreement(
+    scene_id: str,
+    disagreement_id: str,
+    payload: DisagreementCounterRequest,
+) -> Disagreement:
+    return get_store().counter_disagreement(scene_id, disagreement_id, payload)
+
+
+@router.post(
+    '/{scene_id}/disagreement/{disagreement_id}/compromise',
+    response_model=OperationsResult,
+)
+def compromise_disagreement(
+    scene_id: str,
+    disagreement_id: str,
+    payload: DisagreementCompromiseRequest,
+) -> OperationsResult:
+    return get_store().compromise_disagreement(scene_id, disagreement_id, payload)
+
+
+@router.post(
+    '/{scene_id}/disagreement/{disagreement_id}/resolve',
+)
+def resolve_disagreement(
+    scene_id: str,
+    disagreement_id: str,
+    payload: DisagreementResolveRequest,
+):
+    return get_store().resolve_disagreement(scene_id, disagreement_id, payload)

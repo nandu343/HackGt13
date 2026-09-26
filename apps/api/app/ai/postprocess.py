@@ -1,9 +1,10 @@
-"""Shared post-process: run spatial validators; drop/fix illegal ops."""
+"""Shared post-process: value-rank ADD_OBJECT picks, then spatial validators."""
 
 from __future__ import annotations
 
 from ..models import CatalogItem, LayoutResponse, Scene
 from ..validators import scene_product_total, validate_operations
+from .value_picker import apply_value_picks
 
 
 def postprocess_layout(
@@ -11,13 +12,29 @@ def postprocess_layout(
     response: LayoutResponse,
     catalog: dict[str, CatalogItem],
 ) -> LayoutResponse:
-    """Validate proposed ops; keep clamped/legal subset; attach fix warnings.
+    """Value-score ADD_OBJECT products, then validate/clamp ops.
 
     AI `budget` is treated as an *incremental* shopping allowance on top of the
     scene's current product total (existing furniture already in the room).
     """
-    original_count = len(response.operations)
     incremental = response.constraints.budget
+    shopping_budget = incremental if incremental is not None else float('inf')
+
+    # Hybrid path: re-rank ADD_OBJECT productId/assetId peers for bang-for-buck.
+    value_ops, value_picks = apply_value_picks(
+        response.operations,
+        catalog,
+        shopping_budget,
+        prefer_purchasable=True,
+    )
+    response = response.model_copy(
+        update={
+            'operations': value_ops,
+            'value_picks': value_picks or None,
+        }
+    )
+
+    original_count = len(response.operations)
     existing_total = scene_product_total(scene, catalog)
     budget_ceiling = (
         existing_total + incremental if incremental is not None else None
@@ -74,6 +91,26 @@ def postprocess_layout(
     if response.fixed_ops:
         fixed_ops = max(fixed_ops, response.fixed_ops)
 
+    # Keep value_picks tied to surviving ADD_OBJECT ops (prefer object_id match).
+    kept_object_ids = {
+        op.object_id for op in cleaned if op.type == 'ADD_OBJECT' and op.object_id
+    }
+    kept_product_ids = {
+        op.product_id for op in cleaned if op.type == 'ADD_OBJECT' and op.product_id
+    }
+    surviving_picks = []
+    for vp in response.value_picks or []:
+        if vp.object_id:
+            if vp.object_id in kept_object_ids:
+                surviving_picks.append(vp)
+        elif vp.product_id in kept_product_ids:
+            surviving_picks.append(vp)
+    if surviving_picks:
+        warnings.append(
+            f'Value picks: {", ".join(vp.product_id for vp in surviving_picks[:4])}'
+            + ('…' if len(surviving_picks) > 4 else '')
+        )
+
     # Deduplicate warnings while preserving order
     seen: set[str] = set()
     unique_warnings: list[str] = []
@@ -90,4 +127,5 @@ def postprocess_layout(
         warnings=unique_warnings or None,
         planner_mode=response.planner_mode,
         fixed_ops=fixed_ops or None,
+        value_picks=surviving_picks or None,
     )

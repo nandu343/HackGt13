@@ -34,6 +34,7 @@ class OperationEnvelope(CamelModel):
     base_version: int = Field(ge=0)
     actor_id: str | None = None
     op_id: str | None = None
+    label: str | None = None
     operations: list[SceneOperation] = Field(min_length=1)
 
 

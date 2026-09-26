@@ -3,6 +3,7 @@ import SwiftUI
 struct CaptureFlowView: View {
     @Environment(SceneSyncStore.self) private var store
     @State private var showCapture = false
+    @State private var showPlanSheet = false
     @State private var lastExportSummary: String?
 
     var body: some View {
@@ -27,9 +28,22 @@ struct CaptureFlowView: View {
                         Task {
                             await store.uploadScene(DemoSceneFactory.partyDemo(sceneId: store.sceneId))
                             lastExportSummary = store.statusMessage
+                            if store.lastError == nil {
+                                showPlanSheet = true
+                            }
                         }
                     }
                     .disabled(store.isBusy)
+                }
+
+                Section("Plan with AI") {
+                    Text("After a scan (or demo export), ask what you and your friends want to make this space into. Calls the same hybrid `/ai/layout` as the web twin, then applies ops into the shared scene.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    Button("Plan this room") {
+                        showPlanSheet = true
+                    }
+                    .disabled(store.scene == nil || store.isBusy)
                 }
 
                 Section("Sync") {
@@ -55,7 +69,12 @@ struct CaptureFlowView: View {
                             sceneId: store.sceneId
                         )
                         lastExportSummary = "Captured \(scene.objects.count) objects · bounds \(scene.bounds.width)×\(scene.bounds.length)×\(scene.bounds.height) m"
-                        Task { await store.uploadScene(scene) }
+                        Task {
+                            await store.uploadScene(scene)
+                            if store.lastError == nil {
+                                showPlanSheet = true
+                            }
+                        }
                     },
                     onCancel: { showCapture = false }
                 )
@@ -64,6 +83,9 @@ struct CaptureFlowView: View {
                 Text("RoomPlan requires a physical device")
                     .padding()
                 #endif
+            }
+            .sheet(isPresented: $showPlanSheet) {
+                PlanRoomSheet()
             }
         }
     }

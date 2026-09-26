@@ -22,6 +22,19 @@ class LayoutRequest(CamelModel):
     constraints: ConstraintSet | None = None
 
 
+class ValuePick(CamelModel):
+    """Light rationale for a value-scored ADD_OBJECT product choice."""
+
+    product_id: str
+    name: str | None = None
+    score: float
+    reason: str
+    object_id: str | None = None
+    replaced_product_id: str | None = None
+    rating: float | None = None
+    price: float | None = None
+
+
 class LayoutResponse(CamelModel):
     scenario: str
     reasoning_summary: str
@@ -30,6 +43,10 @@ class LayoutResponse(CamelModel):
     warnings: list[str] | None = None
     planner_mode: Literal['rules', 'llm'] | None = None
     fixed_ops: int | None = None
+    value_picks: list[ValuePick] | None = None
+
+
+QualityTier = Literal['budget', 'standard', 'premium']
 
 
 class Product(CamelModel):
@@ -42,6 +59,9 @@ class Product(CamelModel):
     tags: list[str] | None = None
     purchasable: bool = True
     virtual_only: bool = False
+    # Customer rating 1–5; used by bang-for-buck value scorer.
+    rating: float | None = None
+    quality_tier: QualityTier | None = None
 
 
 class CatalogItem(Product):

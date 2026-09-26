@@ -19,6 +19,9 @@ class PresenceUser(CamelModel):
     last_seen_at: str | None = None
     voice_enabled: bool | None = None
     voice_speaking: bool | None = None
+    # Ghost avatar standing point + optional facing (Y-up meters)
+    position: list[float] | None = None
+    look_direction: list[float] | None = None
 
 
 class DrawingStroke(CamelModel):
@@ -30,6 +33,28 @@ class DrawingStroke(CamelModel):
     points: list[list[float]] = Field(min_length=2)
     plane: Literal['wall', 'floor', 'free'] | None = None
     created_at: str | None = None
+
+
+class IntentIdea(CamelModel):
+    """Short collaborative suggestion for post-scan planning."""
+
+    idea_id: str
+    scene_id: str
+    actor_id: str
+    display_name: str | None = None
+    text: str = Field(min_length=1, max_length=280)
+    created_at: str | None = None
+
+
+class IntentDraft(CamelModel):
+    """Live shared draft while the group plans the room."""
+
+    actor_id: str | None = None
+    display_name: str | None = None
+    scenario: str | None = None
+    prompt: str | None = None
+    guest_count: int | None = None
+    budget: float | None = None
 
 
 class SoftLockRequest(CamelModel):
@@ -66,6 +91,10 @@ class WsClientMessage(CamelModel):
         'rtc_ice',
         'draw_stroke',
         'draw_clear',
+        'intent_open',
+        'intent_close',
+        'intent_draft',
+        'intent_idea',
     ]
     user: PresenceUser | None = None
     object_id: str | None = None
@@ -77,6 +106,8 @@ class WsClientMessage(CamelModel):
     to_user_id: str | None = None
     sdp: dict[str, Any] | None = None
     candidate: dict[str, Any] | None = None
+    draft: IntentDraft | None = None
+    idea: IntentIdea | None = None
 
 
 class WsServerMessage(CamelModel):
@@ -94,6 +125,13 @@ class WsServerMessage(CamelModel):
         'draw_stroke',
         'draw_clear',
         'draw_snapshot',
+        'intent_open',
+        'intent_close',
+        'intent_draft',
+        'intent_idea',
+        'intent_snapshot',
+        'timeline',
+        'disagreement',
     ]
     scene_id: str | None = None
     presence: list[PresenceUser] | None = None
@@ -110,3 +148,9 @@ class WsServerMessage(CamelModel):
     to_user_id: str | None = None
     sdp: dict[str, Any] | None = None
     candidate: dict[str, Any] | None = None
+    draft: IntentDraft | None = None
+    idea: IntentIdea | None = None
+    ideas: list[IntentIdea] | None = None
+    intent_open: bool | None = None
+    timeline: list[dict[str, Any]] | None = None
+    disagreement: dict[str, Any] | None = None

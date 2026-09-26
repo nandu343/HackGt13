@@ -77,8 +77,33 @@ def clamp_position_to_bounds(
     return clamped, changed
 
 
+# Structure types stay fixed; scan furniture (source=existing) can be cleared/moved.
+_STRUCTURE_TYPES = frozenset({'wall', 'door', 'window', 'floor', 'ceiling', 'opening'})
+
+
+def is_structure(obj: SceneObject) -> bool:
+    """True for walls / openings — not relocatable for planning."""
+    if obj.type in _STRUCTURE_TYPES:
+        return True
+    return False
+
+
 def is_immovable(obj: SceneObject) -> bool:
+    """Backward-compat: structure is always immovable; else honor movable=False
+    unless the object is room-scan furniture we explicitly allow relocating.
+    """
+    if is_structure(obj):
+        return True
+    # Existing physical furniture may be cleared out of the way for planning
+    # even if a scanner marked movable=False (walls stay protected above).
+    if obj.source == 'existing':
+        return False
     return obj.movable is False
+
+
+def can_relocate(obj: SceneObject) -> bool:
+    """Furniture (including scan `existing`) can be moved or removed for planning."""
+    return not is_immovable(obj)
 
 
 def scene_product_total(scene: Scene, catalog: dict[str, CatalogItem] | None = None) -> float:
@@ -115,8 +140,10 @@ def validate_operations(
                 result.fail(f'MOVE_OBJECT: unknown objectId {op.object_id}')
                 continue
             obj = objects[op.object_id]
-            if is_immovable(obj):
-                result.fail(f'MOVE_OBJECT: object {op.object_id} is immovable')
+            if not can_relocate(obj):
+                result.fail(
+                    f'MOVE_OBJECT: object {op.object_id} is structure (walls stay fixed)'
+                )
                 continue
             if not op.target_position:
                 result.fail(f'MOVE_OBJECT: targetPosition required for {op.object_id}')
@@ -134,8 +161,10 @@ def validate_operations(
                 result.fail(f'ROTATE_OBJECT: unknown objectId {op.object_id}')
                 continue
             obj = objects[op.object_id]
-            if is_immovable(obj):
-                result.fail(f'ROTATE_OBJECT: object {op.object_id} is immovable')
+            if not can_relocate(obj):
+                result.fail(
+                    f'ROTATE_OBJECT: object {op.object_id} is structure (walls stay fixed)'
+                )
                 continue
             if not op.target_rotation:
                 result.fail(f'ROTATE_OBJECT: targetRotation required for {op.object_id}')
@@ -147,8 +176,10 @@ def validate_operations(
                 result.fail(f'DELETE_OBJECT: unknown objectId {op.object_id}')
                 continue
             obj = objects[op.object_id]
-            if is_immovable(obj):
-                result.fail(f'DELETE_OBJECT: object {op.object_id} is immovable')
+            if not can_relocate(obj):
+                result.fail(
+                    f'DELETE_OBJECT: object {op.object_id} is structure (walls stay fixed)'
+                )
                 continue
             del objects[op.object_id]
             working.objects = list(objects.values())
@@ -158,8 +189,10 @@ def validate_operations(
                 result.fail(f'REPLACE_OBJECT: unknown objectId {op.object_id}')
                 continue
             obj = objects[op.object_id]
-            if is_immovable(obj):
-                result.fail(f'REPLACE_OBJECT: object {op.object_id} is immovable')
+            if not can_relocate(obj):
+                result.fail(
+                    f'REPLACE_OBJECT: object {op.object_id} is structure (walls stay fixed)'
+                )
                 continue
             if op.product_id:
                 item = prices.get(op.product_id)

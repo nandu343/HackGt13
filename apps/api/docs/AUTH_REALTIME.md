@@ -90,6 +90,8 @@ ws.send(JSON.stringify({
     color: '#5b8',
     voiceEnabled: false,
     voiceSpeaking: false,
+    position: [0, 0.9, 0],
+    lookDirection: [0, 0, -1],
   },
 }));
 ```
@@ -106,7 +108,7 @@ Media is peer-to-peer; the hub only relays:
 { "type": "rtc_ice", "fromUserId": "a", "toUserId": "b", "candidate": { "candidate": "...", "sdpMid": "0", "sdpMLineIndex": 0 } }
 ```
 
-Offerer = lexicographically smaller `userId`. Presence `voiceEnabled` / `voiceSpeaking` drive UI + mesh membership.
+Offerer = lexicographically smaller `userId`. Presence `voiceEnabled` / `voiceSpeaking` drive UI + mesh membership. Optional `position` / `lookDirection` place remote ghost avatars (web R3F; iOS stub).
 
 ### Drawing strokes
 

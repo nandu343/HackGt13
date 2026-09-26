@@ -2,6 +2,9 @@
 
 Local fallback when Supabase Realtime is not configured. Required for demo.
 Also relays WebRTC voice signaling and ephemeral drawing strokes.
+
+Presence has **no hard peer cap** — any number of clients may join a sceneId.
+WebRTC mesh voice may degrade at high N (O(n²) peer links); joins are still allowed.
 """
 
 from __future__ import annotations
@@ -15,9 +18,11 @@ from typing import Any
 
 from fastapi import WebSocket
 
-from ..models import DrawingStroke, PresenceUser, Scene, SceneOperation
+from ..models import DrawingStroke, IntentDraft, IntentIdea, PresenceUser, Scene, SceneOperation
 
 MAX_STROKES_PER_SCENE = 200
+MAX_INTENT_IDEAS_PER_SCENE = 40
+# No MAX_PRESENCE — unlimited joiners per scene (mesh voice may degrade at high N).
 
 
 def _utc_now_iso() -> str:
@@ -32,6 +37,9 @@ class SceneRoom:
     # user_id -> websocket (for targeted RTC signaling)
     user_sockets: dict[str, WebSocket] = field(default_factory=dict)
     strokes: dict[str, DrawingStroke] = field(default_factory=dict)
+    intent_open: bool = False
+    intent_draft: IntentDraft | None = None
+    intent_ideas: dict[str, IntentIdea] = field(default_factory=dict)
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
 
@@ -111,6 +119,57 @@ class SceneHub:
                         del room.strokes[sid]
                         removed.append(sid)
         return removed
+
+    def intent_snapshot(self, scene_id: str) -> dict[str, Any]:
+        room = self._room(scene_id)
+        return {
+            'open': room.intent_open,
+            'draft': room.intent_draft.model_dump(by_alias=True)
+            if room.intent_draft
+            else None,
+            'ideas': [i.model_dump(by_alias=True) for i in room.intent_ideas.values()],
+        }
+
+    async def set_intent_open(
+        self, scene_id: str, *, open_: bool, draft: IntentDraft | None = None
+    ) -> dict[str, Any]:
+        room = self._room(scene_id)
+        async with room.lock:
+            room.intent_open = open_
+            if draft is not None:
+                room.intent_draft = draft
+            if not open_:
+                # Keep ideas for the session demo, but clear the live draft flag.
+                room.intent_draft = None
+            return {
+                'open': room.intent_open,
+                'draft': room.intent_draft.model_dump(by_alias=True)
+                if room.intent_draft
+                else None,
+                'ideas': [i.model_dump(by_alias=True) for i in room.intent_ideas.values()],
+            }
+
+    async def set_intent_draft(self, scene_id: str, draft: IntentDraft) -> IntentDraft:
+        room = self._room(scene_id)
+        async with room.lock:
+            room.intent_open = True
+            room.intent_draft = draft
+            return draft
+
+    async def add_intent_idea(self, scene_id: str, idea: IntentIdea) -> IntentIdea:
+        room = self._room(scene_id)
+        idea.created_at = idea.created_at or _utc_now_iso()
+        async with room.lock:
+            room.intent_open = True
+            room.intent_ideas[idea.idea_id] = idea
+            if len(room.intent_ideas) > MAX_INTENT_IDEAS_PER_SCENE:
+                ordered = sorted(
+                    room.intent_ideas.values(),
+                    key=lambda i: i.created_at or '',
+                )
+                for old in ordered[: len(room.intent_ideas) - MAX_INTENT_IDEAS_PER_SCENE]:
+                    room.intent_ideas.pop(old.idea_id, None)
+        return idea
 
     async def broadcast(self, scene_id: str, message: dict[str, Any]) -> None:
         room = self._room(scene_id)

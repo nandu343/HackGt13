@@ -5,6 +5,7 @@ import { TransformControls } from '@react-three/drei';
 import { useThree } from '@react-three/fiber';
 import type { SceneObject, Vector3 } from '@shared-spatial-ai/schema';
 import type { Group } from 'three';
+import { canManipulateObject } from '../lib/objectPolicy';
 
 type Props = {
   object: SceneObject;
@@ -29,14 +30,20 @@ const TYPE_COLORS: Record<string, string> = {
   rug: '#6b8f71'
 };
 
-function materialFor(type: string, selected: boolean) {
+function materialFor(type: string, selected: boolean, isExisting: boolean) {
   const color = TYPE_COLORS[type] || '#7a90a4';
   return {
     color,
     roughness: type === 'string_lights' ? 0.35 : 0.55,
     metalness: type === 'floor_lamp' || type === 'lamp' ? 0.45 : 0.08,
-    emissive: selected ? '#1a3a4a' : type.includes('light') ? '#4a3a10' : '#000000',
-    emissiveIntensity: selected ? 0.35 : type.includes('light') ? 0.25 : 0
+    emissive: selected
+      ? isExisting
+        ? '#3a2a12'
+        : '#1a3a4a'
+      : type.includes('light')
+        ? '#4a3a10'
+        : '#000000',
+    emissiveIntensity: selected ? 0.42 : type.includes('light') ? 0.25 : 0
   };
 }
 
@@ -67,11 +74,12 @@ export function ObjectGizmo({
   const w = dims?.width ?? 0.6;
   const h = dims?.height ?? 0.6;
   const d = dims?.depth ?? 0.6;
-  const mat = materialFor(object.type, selected);
+  const isExisting = object.source === 'existing';
+  const mat = materialFor(object.type, selected, isExisting);
   const isWall = object.type === 'wall';
   const isLights = object.type === 'string_lights' || object.type.includes('light');
   const isRug = object.type === 'rug' || (h < 0.05 && w > 1);
-  const movable = object.movable !== false && !disabled;
+  const manipulable = canManipulateObject(object) && !disabled;
 
   return (
     <>
@@ -85,8 +93,18 @@ export function ObjectGizmo({
           receiveShadow={isRug || isWall}
           onClick={(e) => {
             e.stopPropagation();
-            if (object.movable === false) return;
+            if (!canManipulateObject(object)) return;
             onSelect(object.id);
+          }}
+          onPointerOver={(e) => {
+            if (!manipulable) return;
+            e.stopPropagation();
+            gl.domElement.style.cursor = 'pointer';
+          }}
+          onPointerOut={() => {
+            if (gl.domElement.style.cursor === 'pointer') {
+              gl.domElement.style.cursor = 'auto';
+            }
           }}
         >
           {isLights ? (
@@ -103,15 +121,26 @@ export function ObjectGizmo({
             transparent={isWall}
             opacity={isWall ? 0.35 : 1}
           />
-          {selected && (
-            <mesh position={[0, h / 2 + 0.08, 0]}>
-              <sphereGeometry args={[0.06, 12, 12]} />
-              <meshBasicMaterial color="#5ec8ff" />
-            </mesh>
-          )}
         </mesh>
+        {selected && manipulable && (
+          <mesh position={[0, h / 2 + 0.1, 0]}>
+            <sphereGeometry args={[0.07, 14, 14]} />
+            <meshBasicMaterial color={isExisting ? '#e2b45c' : '#5ec8ff'} />
+          </mesh>
+        )}
+        {selected && manipulable && (
+          <mesh position={[0, 0.02, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+            <ringGeometry args={[Math.max(w, d) * 0.42, Math.max(w, d) * 0.52, 48]} />
+            <meshBasicMaterial
+              color={isExisting ? '#e2b45c' : '#5ec8ff'}
+              transparent
+              opacity={0.55}
+              depthWrite={false}
+            />
+          </mesh>
+        )}
       </group>
-      {selected && movable && group && (
+      {selected && manipulable && group && (
         <TransformControls
           object={group}
           mode="translate"

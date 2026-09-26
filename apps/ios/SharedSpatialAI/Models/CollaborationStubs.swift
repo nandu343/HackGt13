@@ -1,6 +1,6 @@
 import Foundation
 
-// MARK: - Collaboration stubs (voice + spatial drawing)
+// MARK: - Collaboration stubs (voice + spatial drawing + ghost avatars)
 //
 // Web twin uses the same FastAPI channel:
 //   WS  /ws/scene/{sceneId}
@@ -11,6 +11,8 @@ import Foundation
 //     { "type": "rtc_ice", "fromUserId", "toUserId", "candidate": { … } | null }
 //   Presence flags (join/presence user object):
 //     voiceEnabled: Bool, voiceSpeaking: Bool
+//     position: [x,y,z]?          // ghost standing point (Y-up meters)
+//     lookDirection: [x,y,z]?     // optional facing / camera forward
 //   Offerer rule (match web): lexicographically smaller userId creates the offer.
 //   STUN: stun:stun.l.google.com:19302 (add TURN later for cellular NAT).
 //
@@ -18,6 +20,19 @@ import Foundation
 //     { "type": "draw_stroke", "stroke": DrawingStrokeDTO }
 //     { "type": "draw_clear", "actorId", "scope": "own"|"all" }
 //   welcome includes strokes[]; draw_clear echoes remaining strokes[].
+//
+// Ghost avatars — remotes from presence[] (skip local userId):
+//   For each peer with `position`, spawn a translucent capsule/sphere Entity
+//   tinted by `color`, billboard label = displayName; pulse opacity when voiceSpeaking.
+//   Broadcast local AR camera / focus as presence.position (~10 Hz, throttle OK).
+//
+// Invite links — web uses /?scene={id}&invite={token} (POST /scene/{id}/invites).
+//   No peer cap on WS presence; mesh voice may degrade at high N. iOS can paste
+//   the scene id / join the same WS channel with a friendly displayName.
+//
+// Existing furniture — RoomPlan marks scanned objects source="existing".
+//   Tap those entities in AR to MOVE_OBJECT / DELETE_OBJECT (clear out of the way);
+//   walls stay immovable. Mirrors web ObjectGizmo + SelectionBar behavior.
 //
 // AR render hint: map each stroke.points → RealityKit Entity with MeshResource
 // generating a thin tube / LineMesh along world positions (same origin as scene graph).
@@ -31,6 +46,32 @@ struct PresenceUserDTO: Codable, Equatable, Sendable {
     var lastSeenAt: String?
     var voiceEnabled: Bool?
     var voiceSpeaking: Bool?
+    /// Ghost standing point in shared Y-up meters (orbit focus / camera presence).
+    var position: Vector3?
+    /// Optional look / facing direction.
+    var lookDirection: Vector3?
+}
+
+/// Thin RealityKit hook: build translucent ghost anchors from a presence snapshot.
+/// Wire from SceneSyncStore when AR session is active; no-op stub for Simulator.
+enum GhostAvatarAnchors {
+    /// Peers to render (everyone except `localUserId` who has a position).
+    static func remoteGhosts(
+        from presence: [PresenceUserDTO],
+        localUserId: String
+    ) -> [PresenceUserDTO] {
+        presence.filter { user in
+            user.userId != localUserId && user.position != nil
+        }
+    }
+
+    /// Suggested mesh: capsule ~0.18r × 0.7h + sphere head, opacity ~0.4, depthWrite off.
+    /// Parent at `position`; yaw from lookDirection.xz when present.
+    static func makeStubEntityDescription(for user: PresenceUserDTO) -> String {
+        let pos = user.position.map { "(\($0.x), \($0.y), \($0.z))" } ?? "nil"
+        let speaking = user.voiceSpeaking == true ? " speaking" : ""
+        return "ghost:\(user.displayName)@\(pos)\(speaking)"
+    }
 }
 
 enum DrawPlane: String, Codable, Sendable {

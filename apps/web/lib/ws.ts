@@ -2,14 +2,34 @@
  * WebSocket client for FastAPI `/ws/scene/{sceneId}`.
  * Server types: welcome | presence | scene | patch | lock | pong | error
  *           | rtc_offer | rtc_answer | rtc_ice | draw_stroke | draw_clear
+ *           | intent_open | intent_close | intent_draft | intent_idea
  * Client types: join | leave | presence | ping | lock | unlock
  *           | rtc_offer | rtc_answer | rtc_ice | draw_stroke | draw_clear
+ *           | intent_open | intent_close | intent_draft | intent_idea
  * Enabled by default; set NEXT_PUBLIC_SCENE_WS=0 to disable.
  */
 
 import type { DrawingStroke, PresenceUser } from '@shared-spatial-ai/schema';
 
 export type { PresenceUser };
+
+export type IntentDraftPayload = {
+  actorId?: string | null;
+  displayName?: string | null;
+  scenario?: string | null;
+  prompt?: string | null;
+  guestCount?: number | null;
+  budget?: number | null;
+};
+
+export type IntentIdeaPayload = {
+  ideaId: string;
+  sceneId: string;
+  actorId: string;
+  displayName?: string | null;
+  text: string;
+  createdAt?: string | null;
+};
 
 export type SceneSocketMessage = {
   type:
@@ -26,6 +46,13 @@ export type SceneSocketMessage = {
     | 'draw_stroke'
     | 'draw_clear'
     | 'draw_snapshot'
+    | 'intent_open'
+    | 'intent_close'
+    | 'intent_draft'
+    | 'intent_idea'
+    | 'intent_snapshot'
+    | 'timeline'
+    | 'disagreement'
     | string;
   sceneId?: string;
   version?: number;
@@ -44,6 +71,13 @@ export type SceneSocketMessage = {
   toUserId?: string;
   sdp?: RTCSessionDescriptionInit;
   candidate?: RTCIceCandidateInit | null;
+  intentOpen?: boolean;
+  draft?: IntentDraftPayload | null;
+  idea?: IntentIdeaPayload;
+  ideas?: IntentIdeaPayload[];
+  timeline?: unknown[];
+  entry?: unknown;
+  disagreement?: unknown;
   payload?: {
     ok?: boolean;
     objectId?: string;
@@ -117,33 +151,37 @@ export type PresencePayload = {
   selectedObjectId?: string | null;
   voiceEnabled?: boolean;
   voiceSpeaking?: boolean;
+  /** Ghost standing point (Y-up meters). */
+  position?: [number, number, number] | null;
+  /** Optional look / facing direction. */
+  lookDirection?: [number, number, number] | null;
 };
+
+function presenceUserBody(user: PresencePayload): Record<string, unknown> {
+  const body: Record<string, unknown> = {
+    userId: user.userId,
+    displayName: user.displayName,
+    color: user.color,
+    selectedObjectId: user.selectedObjectId ?? null,
+    voiceEnabled: user.voiceEnabled ?? false,
+    voiceSpeaking: user.voiceSpeaking ?? false
+  };
+  if (user.position) body.position = user.position;
+  if (user.lookDirection) body.lookDirection = user.lookDirection;
+  return body;
+}
 
 export function sendSceneJoin(socket: WebSocket, user: PresencePayload): void {
   sendJson(socket, {
     type: 'join',
-    user: {
-      userId: user.userId,
-      displayName: user.displayName,
-      color: user.color,
-      selectedObjectId: user.selectedObjectId ?? null,
-      voiceEnabled: user.voiceEnabled ?? false,
-      voiceSpeaking: user.voiceSpeaking ?? false
-    }
+    user: presenceUserBody(user)
   });
 }
 
 export function sendScenePresence(socket: WebSocket, user: PresencePayload): void {
   sendJson(socket, {
     type: 'presence',
-    user: {
-      userId: user.userId,
-      displayName: user.displayName,
-      color: user.color,
-      selectedObjectId: user.selectedObjectId ?? null,
-      voiceEnabled: user.voiceEnabled ?? false,
-      voiceSpeaking: user.voiceSpeaking ?? false
-    }
+    user: presenceUserBody(user)
   });
 }
 
@@ -210,4 +248,29 @@ export function sendDrawClear(
   scope: 'own' | 'all' = 'own'
 ): void {
   sendJson(socket, { type: 'draw_clear', actorId, scope });
+}
+
+export function sendIntentOpen(
+  socket: WebSocket,
+  draft: IntentDraftPayload
+): void {
+  sendJson(socket, { type: 'intent_open', draft });
+}
+
+export function sendIntentClose(socket: WebSocket, actorId?: string): void {
+  sendJson(socket, { type: 'intent_close', actorId });
+}
+
+export function sendIntentDraft(
+  socket: WebSocket,
+  draft: IntentDraftPayload
+): void {
+  sendJson(socket, { type: 'intent_draft', draft });
+}
+
+export function sendIntentIdea(
+  socket: WebSocket,
+  idea: IntentIdeaPayload
+): void {
+  sendJson(socket, { type: 'intent_idea', idea });
 }

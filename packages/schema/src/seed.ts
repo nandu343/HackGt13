@@ -74,6 +74,8 @@ export const demoCatalog = [
     tags: ['seating', 'living'],
     purchasable: true,
     virtualOnly: false,
+    rating: 4.6,
+    qualityTier: 'premium',
     category: 'seating'
   },
   {
@@ -86,6 +88,8 @@ export const demoCatalog = [
     tags: ['seating', 'party'],
     purchasable: true,
     virtualOnly: false,
+    rating: 3.2,
+    qualityTier: 'budget',
     category: 'seating'
   },
   {
@@ -98,6 +102,8 @@ export const demoCatalog = [
     tags: ['seating', 'dining'],
     purchasable: true,
     virtualOnly: false,
+    rating: 4.3,
+    qualityTier: 'standard',
     category: 'seating'
   },
   {
@@ -110,6 +116,8 @@ export const demoCatalog = [
     tags: ['seating', 'party'],
     purchasable: true,
     virtualOnly: false,
+    rating: 4.4,
+    qualityTier: 'standard',
     category: 'seating'
   },
   {
@@ -122,6 +130,8 @@ export const demoCatalog = [
     tags: ['seating', 'movie', 'party'],
     purchasable: true,
     virtualOnly: false,
+    rating: 4.1,
+    qualityTier: 'budget',
     category: 'seating'
   },
   {
@@ -134,6 +144,8 @@ export const demoCatalog = [
     tags: ['table', 'living'],
     purchasable: true,
     virtualOnly: false,
+    rating: 4.2,
+    qualityTier: 'standard',
     category: 'tables'
   },
   {
@@ -146,6 +158,8 @@ export const demoCatalog = [
     tags: ['desk', 'study', 'table'],
     purchasable: true,
     virtualOnly: false,
+    rating: 4.5,
+    qualityTier: 'standard',
     category: 'tables'
   },
   {
@@ -158,6 +172,8 @@ export const demoCatalog = [
     tags: ['table', 'dining'],
     purchasable: true,
     virtualOnly: false,
+    rating: 4.4,
+    qualityTier: 'premium',
     category: 'tables'
   },
   {
@@ -170,6 +186,8 @@ export const demoCatalog = [
     tags: ['lighting'],
     purchasable: true,
     virtualOnly: false,
+    rating: 4.0,
+    qualityTier: 'standard',
     category: 'lighting'
   },
   {
@@ -182,6 +200,8 @@ export const demoCatalog = [
     tags: ['party', 'lighting'],
     purchasable: true,
     virtualOnly: false,
+    rating: 4.5,
+    qualityTier: 'budget',
     category: 'lighting'
   },
   {
@@ -194,6 +214,8 @@ export const demoCatalog = [
     tags: ['lighting', 'study'],
     purchasable: true,
     virtualOnly: false,
+    rating: 4.4,
+    qualityTier: 'standard',
     category: 'lighting'
   },
   {
@@ -206,6 +228,8 @@ export const demoCatalog = [
     tags: ['lighting', 'dining'],
     purchasable: true,
     virtualOnly: false,
+    rating: 4.3,
+    qualityTier: 'standard',
     category: 'lighting'
   },
   {
@@ -218,6 +242,8 @@ export const demoCatalog = [
     tags: ['party', 'decor', 'movie'],
     purchasable: true,
     virtualOnly: false,
+    rating: 4.2,
+    qualityTier: 'budget',
     category: 'decor'
   },
   {
@@ -230,6 +256,8 @@ export const demoCatalog = [
     tags: ['decor'],
     purchasable: true,
     virtualOnly: false,
+    rating: 4.0,
+    qualityTier: 'standard',
     category: 'decor'
   },
   {
@@ -242,6 +270,8 @@ export const demoCatalog = [
     tags: ['party', 'floor'],
     purchasable: true,
     virtualOnly: false,
+    rating: 4.1,
+    qualityTier: 'standard',
     category: 'floor'
   },
   {
@@ -254,6 +284,8 @@ export const demoCatalog = [
     tags: ['movie', 'decor'],
     purchasable: true,
     virtualOnly: false,
+    rating: 4.5,
+    qualityTier: 'standard',
     category: 'decor'
   },
   {
@@ -266,6 +298,8 @@ export const demoCatalog = [
     tags: ['virtual', 'helper'],
     purchasable: false,
     virtualOnly: true,
+    rating: 0.0,
+    qualityTier: 'budget',
     category: 'virtual'
   },
   {
@@ -278,6 +312,8 @@ export const demoCatalog = [
     tags: ['virtual', 'lighting', 'party'],
     purchasable: false,
     virtualOnly: true,
+    rating: 0.0,
+    qualityTier: 'budget',
     category: 'virtual'
   }
 ];

@@ -45,6 +45,7 @@ Return ONLY valid JSON matching this schema (camelCase keys):
 Rules:
 - Emit operations only — never return a full scene JSON.
 - Prefer MOVE/ROTATE of existing movable objects; ADD_OBJECT from catalog productIds when needed.
+- Prefer high-rated, lower-cost purchasable catalog items that still meet quality (rating >= ~3.5); avoid virtualOnly when shopping.
 - Stay within budget and room bounds (meters, Y-up, origin at floor center).
 - Clear the room center for party/dinner when asked.
 - Do not move immovable walls.
@@ -76,9 +77,13 @@ def _catalog_brief(catalog: dict[str, CatalogItem], limit: int = 24) -> list[dic
             'productId': i.product_id,
             'name': i.name,
             'price': i.price,
+            'rating': i.rating,
+            'qualityTier': i.quality_tier,
             'tags': i.tags,
             'category': i.category,
             'assetId': i.asset_id,
+            'purchasable': i.purchasable,
+            'virtualOnly': i.virtual_only,
             'dimensions': i.dimensions.model_dump(by_alias=True) if i.dimensions else None,
         }
         for i in items

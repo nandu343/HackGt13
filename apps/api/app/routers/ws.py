@@ -1,16 +1,26 @@
-"""WebSocket /ws/scene/{sceneId} — presence, scene, voice signaling, drawing."""
+"""WebSocket /ws/scene/{sceneId} — presence, scene, voice signaling, drawing, intent."""
 
 from __future__ import annotations
 
 import json
+import uuid
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from ..models import DrawingStroke, PresenceUser
+from ..models import DrawingStroke, IntentDraft, IntentIdea, PresenceUser
 from ..realtime import get_hub
 from ..store import get_store
 
 router = APIRouter(tags=['realtime'])
+
+
+def _parse_vec3(raw: object | None) -> list[float] | None:
+    if not isinstance(raw, (list, tuple)) or len(raw) < 3:
+        return None
+    try:
+        return [float(raw[0]), float(raw[1]), float(raw[2])]
+    except (TypeError, ValueError):
+        return None
 
 
 def _parse_presence_user(data: dict, fallback_uid: str | None = None) -> PresenceUser | None:
@@ -37,6 +47,27 @@ def _parse_presence_user(data: dict, fallback_uid: str | None = None) -> Presenc
         voice_speaking=user_raw.get('voiceSpeaking')
         if 'voiceSpeaking' in user_raw
         else user_raw.get('voice_speaking'),
+        position=_parse_vec3(user_raw.get('position')),
+        look_direction=_parse_vec3(
+            user_raw.get('lookDirection') or user_raw.get('look_direction')
+        ),
+    )
+
+
+def _parse_intent_draft(data: dict, fallback_actor: str | None = None) -> IntentDraft:
+    draft_raw = data.get('draft') or data
+    return IntentDraft(
+        actor_id=draft_raw.get('actorId')
+        or draft_raw.get('actor_id')
+        or data.get('actorId')
+        or fallback_actor,
+        display_name=draft_raw.get('displayName') or draft_raw.get('display_name'),
+        scenario=draft_raw.get('scenario'),
+        prompt=draft_raw.get('prompt'),
+        guest_count=draft_raw.get('guestCount')
+        if 'guestCount' in draft_raw
+        else draft_raw.get('guest_count'),
+        budget=draft_raw.get('budget'),
     )
 
 
@@ -55,6 +86,9 @@ async def scene_websocket(websocket: WebSocket, scene_id: str) -> None:
     await hub.connect(scene_id, websocket)
     user_id: str | None = None
 
+    intent = hub.intent_snapshot(scene_id)
+    timeline = store.get_timeline(scene_id)
+    disagreement = store.get_disagreement(scene_id)
     await websocket.send_json(
         {
             'type': 'welcome',
@@ -63,7 +97,12 @@ async def scene_websocket(websocket: WebSocket, scene_id: str) -> None:
             'scene': scene.model_dump(by_alias=True),
             'presence': [u.model_dump(by_alias=True) for u in hub.presence_list(scene_id)],
             'strokes': [s.model_dump(by_alias=True) for s in hub.strokes_list(scene_id)],
-            'message': 'Connected to in-memory scene channel (voice + drawing enabled).',
+            'intentOpen': intent['open'],
+            'draft': intent['draft'],
+            'ideas': intent['ideas'],
+            'timeline': [e.model_dump(by_alias=True) for e in timeline.entries],
+            'disagreement': disagreement.model_dump(by_alias=True) if disagreement else None,
+            'message': 'Connected to in-memory scene channel (voice + drawing + intent + timeline).',
         }
     )
 
@@ -88,7 +127,7 @@ async def scene_websocket(websocket: WebSocket, scene_id: str) -> None:
                         {'type': 'error', 'message': 'user.userId required'}
                     )
                     continue
-                # Preserve voice flags if client omits them on selection-only presence updates
+                # Preserve voice / pose if client omits them on selection-only presence updates
                 existing = next(
                     (u for u in hub.presence_list(scene_id) if u.user_id == user.user_id),
                     None,
@@ -98,6 +137,10 @@ async def scene_websocket(websocket: WebSocket, scene_id: str) -> None:
                         user.voice_enabled = existing.voice_enabled
                     if user.voice_speaking is None:
                         user.voice_speaking = existing.voice_speaking
+                    if user.position is None:
+                        user.position = existing.position
+                    if user.look_direction is None:
+                        user.look_direction = existing.look_direction
                 user_id = user.user_id
                 await hub.upsert_presence(scene_id, user, websocket)
                 await hub.broadcast_presence(scene_id)
@@ -271,6 +314,96 @@ async def scene_websocket(websocket: WebSocket, scene_id: str) -> None:
                             s.model_dump(by_alias=True)
                             for s in hub.strokes_list(scene_id)
                         ],
+                    },
+                )
+                continue
+
+            # --- Collaborative intent / planning ---
+            if msg_type == 'intent_open':
+                draft = _parse_intent_draft(data, user_id)
+                snap = await hub.set_intent_open(scene_id, open_=True, draft=draft)
+                await hub.broadcast(
+                    scene_id,
+                    {
+                        'type': 'intent_open',
+                        'sceneId': scene_id,
+                        'intentOpen': True,
+                        'draft': snap['draft'],
+                        'ideas': snap['ideas'],
+                        'actorId': draft.actor_id or user_id,
+                    },
+                )
+                continue
+
+            if msg_type == 'intent_close':
+                snap = await hub.set_intent_open(scene_id, open_=False)
+                await hub.broadcast(
+                    scene_id,
+                    {
+                        'type': 'intent_close',
+                        'sceneId': scene_id,
+                        'intentOpen': False,
+                        'draft': None,
+                        'ideas': snap['ideas'],
+                        'actorId': user_id,
+                    },
+                )
+                continue
+
+            if msg_type == 'intent_draft':
+                draft = _parse_intent_draft(data, user_id)
+                saved = await hub.set_intent_draft(scene_id, draft)
+                await hub.broadcast(
+                    scene_id,
+                    {
+                        'type': 'intent_draft',
+                        'sceneId': scene_id,
+                        'intentOpen': True,
+                        'draft': saved.model_dump(by_alias=True),
+                        'actorId': saved.actor_id or user_id,
+                    },
+                )
+                continue
+
+            if msg_type == 'intent_idea':
+                idea_raw = data.get('idea') or data
+                text = (idea_raw.get('text') or '').strip()
+                if not text:
+                    await websocket.send_json(
+                        {'type': 'error', 'message': 'idea.text required'}
+                    )
+                    continue
+                try:
+                    idea = IntentIdea(
+                        idea_id=idea_raw.get('ideaId')
+                        or idea_raw.get('idea_id')
+                        or f'idea_{uuid.uuid4().hex[:10]}',
+                        scene_id=scene_id,
+                        actor_id=idea_raw.get('actorId')
+                        or idea_raw.get('actor_id')
+                        or user_id
+                        or 'anon',
+                        display_name=idea_raw.get('displayName')
+                        or idea_raw.get('display_name'),
+                        text=text[:280],
+                        created_at=idea_raw.get('createdAt')
+                        or idea_raw.get('created_at'),
+                    )
+                except Exception as exc:
+                    await websocket.send_json(
+                        {'type': 'error', 'message': f'Invalid idea: {exc}'}
+                    )
+                    continue
+                saved_idea = await hub.add_intent_idea(scene_id, idea)
+                snap = hub.intent_snapshot(scene_id)
+                await hub.broadcast(
+                    scene_id,
+                    {
+                        'type': 'intent_idea',
+                        'sceneId': scene_id,
+                        'intentOpen': True,
+                        'idea': saved_idea.model_dump(by_alias=True),
+                        'ideas': snap['ideas'],
                     },
                 )
                 continue

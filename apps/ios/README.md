@@ -54,17 +54,27 @@ Or set scheme environment variable `SHARED_SPATIAL_API_URL`.
 
 | Tab | Role |
 |-----|------|
-| **Capture** | RoomPlan scan → normalize → `POST /scene`. Simulator: “Export demo room”. |
+| **Capture** | RoomPlan scan → normalize → `POST /scene`. Simulator: “Export demo room”. After export/scan, **Plan this room** sheet opens (or use the button). |
 | **Viewer** | RealityKit (non-AR) pull of `GET /scene/{id}`; refresh after web edits. |
 | **AR** | Overlay stub: place/nudge anchors → `POST /scene/{id}/operations`. Device-only camera. |
 | **Settings** | API URL / scene id / coordinate notes. |
+
+### Plan this room (post-scan intent)
+
+1. Export demo room (or finish RoomPlan) → sheet asks what to make the space into (party / study / dinner / movie / custom).
+2. **Get AI recommendations** → `POST /ai/layout` (same hybrid planner as web; Grok when `XAI_API_KEY` is set).
+3. Review reasoning + ops → **Accept into scene** → `POST /scene/{id}/operations`.
+4. Refresh **Viewer** / **AR** (and the web twin) to see placed objects in the shared Y-up frame.
+
+---
 
 ## Sync loop with the web twin
 
 ```text
 iOS RoomPlan / demo export ──POST /scene──► FastAPI SceneStore
+iOS Plan sheet ──POST /ai/layout──► ops ──POST …/operations──┤
                                               │
-web drag / AI accept ──POST …/operations──────┤
+web Plan with friends / drag ──POST …/operations──────────────┤
                                               ▼
 iOS Viewer refresh ◄──GET /scene/{id}─────────┘
 iOS AR place/move  ──POST …/operations────────┘
@@ -83,7 +93,7 @@ Documented in `Models/Coordinates.swift` and schema:
 
 ## Collaboration (voice + drawing) — signaling contract
 
-Web clients already use WebRTC mesh voice + spatial whiteboard over the same channel. iOS can join later without changing the API.
+Web clients already use WebRTC mesh voice + spatial whiteboard + **collaborative intent** over the same channel. iOS can join later without changing the API.
 
 ### Channel
 
@@ -91,7 +101,7 @@ Web clients already use WebRTC mesh voice + spatial whiteboard over the same cha
 WS  ws://<api-host>:8000/ws/scene/{sceneId}
 ```
 
-Join with presence (include voice flags when implementing mic):
+Join with presence (include voice flags + ghost pose when implementing mic / AR):
 
 ```json
 {
@@ -101,10 +111,24 @@ Join with presence (include voice flags when implementing mic):
     "displayName": "iPhone",
     "color": "#e2b45c",
     "voiceEnabled": false,
-    "voiceSpeaking": false
+    "voiceSpeaking": false,
+    "position": [0, 0.9, 0],
+    "lookDirection": [0, 0, -1]
   }
 }
 ```
+
+**Ghost avatars:** remotes with `position` render as translucent capsule/sphere entities (`GhostAvatarAnchors` in `CollaborationStubs.swift`). Skip local `userId`; pulse when `voiceSpeaking`. Broadcast AR camera / focus on the same presence channel.
+
+### Invite links (web + future iOS)
+
+Web shares `/?scene={sceneId}&invite={token}` from `POST /scene/{id}/invites` (or `GET …/invites/default`). Resolve with `GET /invite/{token}`. There is **no peer cap** on WS presence — mesh voice may degrade at high N.
+
+**iOS stub path:** open the same URL (universal link / paste in Settings later), set `APIConfig.sceneId` from the query, join WS with a friendly `displayName`. No hard limit on simultaneous devices.
+
+### Existing furniture (AR select)
+
+RoomPlan export marks scanned furniture `source: "existing"` and `movable: true`; walls are `movable: false`. On web, existing furniture is clickable to **move** or **remove** (clear out of the way). For AR stubs: tap a RealityKit entity with `source == existing` → show move gizmo / remove control that posts `MOVE_OBJECT` or `DELETE_OBJECT` (validators protect walls). See `CollaborationStubs.swift` for presence/ghost patterns; wire selection when extending the AR overlay.
 
 ### Voice (WebRTC)
 
@@ -127,6 +151,15 @@ Offerer rule: smaller `userId` string creates the offer (matches web `VoiceMesh`
 
 **AR render path:** for each stroke, spawn a RealityKit entity whose mesh follows `points` in the shared room frame (same origin as `SceneDTO` objects). Wall-plane strokes from web sit near `z = -bounds.length/2`.
 
+### Intent (group planning)
+
+| Type | Role |
+|------|------|
+| `intent_open` / `intent_draft` | Shared scenario draft while planning |
+| `intent_idea` | Short friend suggestions (hub keeps a list; included on `welcome`) |
+
+iOS currently uses the **Plan this room** HTTP sheet rather than the WS intent channel.
+
 ---
 
 ## Device vs Simulator
@@ -135,6 +168,7 @@ Offerer rule: smaller `userId` string creates the offer (matches web `VoiceMesh`
 |------------|-----------|--------------|
 | `GET /scene` + Viewer | Yes | Yes |
 | Demo scene `POST /scene` | Yes | Yes |
+| Plan this room → `/ai/layout` | Yes | Yes |
 | Live RoomPlan capture | No | Yes (LiDAR) |
 | AR camera overlay | Stub buttons only | Yes |
 
@@ -147,7 +181,10 @@ RoomPlan needs a Pro/Max iPhone or iPad Pro with LiDAR. Without LiDAR, use demo 
 | `GET` | `/scene/{sceneId}` | Pull shared graph |
 | `POST` | `/scene` | Upsert full normalized scene (RoomPlan export) |
 | `PUT` | `/scene/{sceneId}` | Same upsert by path |
-| `POST` | `/scene/{sceneId}/operations` | Validated ops (`MOVE_OBJECT`, `ADD_OBJECT`, …) |
+| `POST` | `/scene/{sceneId}/operations` | Validated ops (`MOVE_OBJECT`, `DELETE_OBJECT`, …) |
+| `POST` | `/scene/{sceneId}/invites` | Create shareable invite token (unlimited peers) |
+| `GET` | `/invite/{token}` | Resolve invite → sceneId |
+| `POST` | `/ai/layout` | Hybrid planner (Accept applies via operations) |
 
 Ops use `baseVersion` — stale versions return **409**; the app refreshes and surfaces the error.
 
@@ -160,9 +197,9 @@ apps/ios/
 ├── SharedSpatialAI.xcodeproj/
 └── SharedSpatialAI/
     ├── App/                    # SwiftUI entry + tabs
-    ├── Models/                 # Scene DTOs + coordinates + collaboration stubs
+    ├── Models/                 # Scene DTOs + coordinates + layout + collaboration stubs
     ├── Networking/             # API client + sync store
-    ├── RoomPlan/               # Capture + exporter
+    ├── RoomPlan/               # Capture + exporter + PlanRoomSheet
     ├── Viewer/                 # RealityKit non-AR viewer
     ├── AR/                     # AR overlay stub
     └── Resources/              # Info.plist, assets
@@ -172,7 +209,8 @@ apps/ios/
 
 1. Start API (`--host 0.0.0.0`) and web twin.
 2. Open this Xcode project; run on Simulator.
-3. **Capture** → “Export demo room → POST /scene” (or scan on device).
-4. Refresh the web twin — same objects / version bump.
-5. Move something on the web → **Viewer** refresh on iOS.
-6. On device: **AR** → Place chair → web sees the new object via ops.
+3. **Capture** → “Export demo room → POST /scene” → **Plan this room** sheet appears.
+4. Pick a scenario → Get AI recommendations → Accept — web twin version bumps with new objects.
+5. Or skip planning: refresh the web twin after export alone.
+6. Move something on the web → **Viewer** refresh on iOS.
+7. On device: **AR** → Place chair → web sees the new object via ops.

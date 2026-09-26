@@ -26,7 +26,10 @@ def get_settings() -> 'Settings':
 
 class Settings:
     def __init__(self) -> None:
-        origins = os.getenv('CORS_ORIGINS', 'http://localhost:3000')
+        origins = os.getenv(
+            'CORS_ORIGINS',
+            'http://localhost:3000,http://127.0.0.1:3000',
+        )
         self.cors_origins = [o.strip() for o in origins.split(',') if o.strip()]
         self.scene_store = os.getenv('SCENE_STORE', 'memory').lower()
         self.supabase_url = os.getenv('SUPABASE_URL', '').strip()

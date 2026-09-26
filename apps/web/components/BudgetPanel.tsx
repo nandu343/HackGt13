@@ -3,9 +3,13 @@
 import { useSceneStore } from '../lib/sceneStore';
 
 export function BudgetPanel() {
-  const { budgetUsed, targetBudget, scene, productMap, checkout, isBusy } = useSceneStore();
+  const { budgetUsed, targetBudget, scene, productMap, checkout, isBusy, pendingLayout } =
+    useSceneStore();
   const over = budgetUsed > targetBudget;
   const currency = scene?.currency || 'USD';
+  const bestValueIds = new Set(
+    (pendingLayout?.valuePicks ?? []).map((vp) => vp.productId)
+  );
 
   const lines = (scene?.objects || [])
     .filter((o) => o.productId && productMap.has(o.productId))
@@ -15,6 +19,7 @@ export function BudgetPanel() {
         id: o.id,
         name: p.name,
         price: p.price,
+        productId: o.productId!,
         purchasable: p.purchasable !== false && !p.virtualOnly
       };
     });
@@ -38,6 +43,12 @@ export function BudgetPanel() {
         {currency} · {lines.length} priced object{lines.length === 1 ? '' : 's'}
         {over ? ' · over budget' : ''}
       </p>
+      {(pendingLayout?.valuePicks?.length ?? 0) > 0 && (
+        <p className="budget-meta">
+          AI recommended {(pendingLayout!.valuePicks ?? []).length} best-value pick
+          {(pendingLayout!.valuePicks ?? []).length === 1 ? '' : 's'}
+        </p>
+      )}
       {lines.length > 0 && (
         <ul className="budget-lines">
           {lines.map((l) => (
@@ -45,6 +56,9 @@ export function BudgetPanel() {
               <span>
                 {l.name}
                 {!l.purchasable ? ' (virtual)' : ''}
+                {bestValueIds.has(l.productId) ? (
+                  <span className="value-badge inline">Best value pick</span>
+                ) : null}
               </span>
               <span>${l.price.toFixed(0)}</span>
             </li>

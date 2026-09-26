@@ -11,38 +11,57 @@ import {
   type ReactNode
 } from 'react';
 import {
+  DisagreementSchema,
   DrawingStrokeSchema,
   SceneSchema,
+  TimelineEntrySchema,
   type CatalogItem,
+  type Disagreement,
   type DrawingStroke,
   type LayoutRequest,
   type LayoutResponse,
   type PresenceUser,
   type Scene,
+  type SceneObject,
   type SceneOperation,
+  type TimelineEntry,
   type Vector3
 } from '@shared-spatial-ai/schema';
 import {
   ApiError,
   fetchCatalog,
+  fetchDisagreement,
   fetchHealth,
   fetchScene,
+  fetchTimeline,
   getApiBaseUrl,
   postAiLayout,
   postCheckout,
-  postOperations
+  postDisagreement,
+  postDisagreementCompromise,
+  postDisagreementCounter,
+  postDisagreementResolve,
+  postOperations,
+  postTimelineBranch,
+  postTimelineRestore
 } from './api';
 import { blendScenes } from './lerp';
+import { canManipulateObject } from './objectPolicy';
 import { VoiceMesh, type VoiceState } from './voiceMesh';
 import {
   createSceneSocket,
   isSceneWsEnabled,
   sendDrawClear,
   sendDrawStroke,
+  sendIntentDraft,
+  sendIntentIdea,
+  sendIntentOpen,
   sendSceneJoin,
   sendSceneLock,
   sendScenePresence,
-  sendSceneUnlock
+  sendSceneUnlock,
+  type IntentDraftPayload,
+  type IntentIdeaPayload
 } from './ws';
 export const DEMO_SCENE_ID = 'scene_party_001';
 
@@ -60,6 +79,46 @@ function resolveActorId(): string {
     return 'web_demo_user';
   }
 }
+
+/** Stable pastel-ish chip color from actor id (distinct per browser tab). */
+function colorFromId(id: string): string {
+  let h = 216;
+  for (let i = 0; i < id.length; i++) {
+    h = (h * 31 + id.charCodeAt(i)) >>> 0;
+  }
+  const hue = h % 360;
+  return `hsl(${hue} 52% 58%)`;
+}
+
+function intentSeenKey(sceneId: string): string {
+  return `ssa_intent_seen_${sceneId}`;
+}
+
+const DISPLAY_NAME_KEY = 'ssa_display_name';
+
+function resolveDisplayName(actorId: string): string {
+  if (typeof window === 'undefined') return 'Guest';
+  try {
+    const saved = localStorage.getItem(DISPLAY_NAME_KEY)?.trim();
+    if (saved) return saved.slice(0, 40);
+  } catch {
+    // ignore
+  }
+  return `Web ${actorId.replace(/^web_/, '').slice(0, 4) || 'demo'}`;
+}
+
+function persistDisplayName(name: string): void {
+  try {
+    localStorage.setItem(DISPLAY_NAME_KEY, name.slice(0, 40));
+  } catch {
+    // ignore
+  }
+}
+
+
+export type IntentIdea = IntentIdeaPayload;
+
+export type IntentDraft = IntentDraftPayload;
 
 export type ConnectionStatus =
   | 'connecting'
@@ -91,9 +150,15 @@ type SceneStoreValue = {
   animating: boolean;
   presence: PresenceUser[];
   actorId: string;
+  displayName: string;
+  setDisplayName: (name: string) => void;
   voice: VoiceState;
   drawMode: boolean;
   strokes: DrawingStroke[];
+  intentModalOpen: boolean;
+  intentIdeas: IntentIdea[];
+  intentDraft: IntentDraft | null;
+  intentSessionActive: boolean;
   setSelectedObjectId: (id: string | null) => void;
   setPrompt: (v: string) => void;
   setTargetBudget: (v: number) => void;
@@ -104,9 +169,27 @@ type SceneStoreValue = {
   applyLocalMove: (objectId: string, position: Vector3) => Promise<void>;
   applyLocalRotate: (objectId: string, rotation: [number, number, number, number]) => Promise<void>;
   deleteSelected: () => Promise<void>;
-  requestLayout: () => Promise<void>;
+  requestLayout: (overrides?: {
+    prompt?: string;
+    guestCount?: number;
+    budget?: number;
+  }) => Promise<void>;
   acceptLayout: () => Promise<void>;
   rejectLayout: () => void;
+  timeline: TimelineEntry[];
+  disagreement: Disagreement | null;
+  disagreementView: 'both' | 'A' | 'B' | 'live';
+  compromisePicks: Record<string, 'A' | 'B'>;
+  ghostObjectsA: SceneObject[];
+  ghostObjectsB: SceneObject[];
+  proposeDisagreement: () => Promise<void>;
+  counterDisagreement: () => Promise<void>;
+  compromiseDisagreement: (mode: 'blend' | 'picks' | 'a' | 'b') => Promise<void>;
+  cancelDisagreement: () => Promise<void>;
+  setDisagreementView: (v: 'both' | 'A' | 'B' | 'live') => void;
+  setCompromisePick: (objectId: string, side: 'A' | 'B') => void;
+  restoreTimelineEntry: (entryId: string) => Promise<void>;
+  branchTimelineEntry: (entryId: string, name: string) => Promise<void>;
   addCatalogItem: (productId: string) => Promise<void>;
   checkout: () => Promise<void>;
   undo: () => Promise<void>;
@@ -116,6 +199,16 @@ type SceneStoreValue = {
   addStroke: (stroke: Omit<DrawingStroke, 'sceneId' | 'actorId'> & { sceneId?: string; actorId?: string }) => void;
   clearOwnStrokes: () => void;
   clearAllStrokes: () => void;
+  openIntentModal: () => void;
+  closeIntentModal: () => void;
+  broadcastIntentDraft: (draft: Partial<IntentDraft>) => void;
+  addIntentIdea: (text: string) => void;
+  markIntentSeen: () => void;
+  /** Broadcast local camera/orbit focus as ghost presence (throttled by caller). */
+  reportPresencePose: (
+    position: Vector3,
+    lookDirection?: Vector3 | null
+  ) => void;
   productMap: Map<string, CatalogItem>;
   budgetUsed: number;
 };
@@ -153,6 +246,9 @@ export function SceneStoreProvider({
   const [historyDepth, setHistoryDepth] = useState(0);
   const [presence, setPresence] = useState<PresenceUser[]>([]);
   const [actorId] = useState(() => resolveActorId());
+  const [displayName, setDisplayNameState] = useState(() =>
+    resolveDisplayName(resolveActorId())
+  );
   const [voice, setVoice] = useState<VoiceState>({
     enabled: false,
     muted: true,
@@ -161,6 +257,18 @@ export function SceneStoreProvider({
   });
   const [drawMode, setDrawMode] = useState(false);
   const [strokes, setStrokes] = useState<DrawingStroke[]>([]);
+  const [intentModalOpen, setIntentModalOpen] = useState(false);
+  const [intentIdeas, setIntentIdeas] = useState<IntentIdea[]>([]);
+  const [intentDraft, setIntentDraft] = useState<IntentDraft | null>(null);
+  const [intentSessionActive, setIntentSessionActive] = useState(false);
+  const [timeline, setTimeline] = useState<TimelineEntry[]>([]);
+  const [disagreement, setDisagreement] = useState<Disagreement | null>(null);
+  const [disagreementView, setDisagreementView] = useState<
+    'both' | 'A' | 'B' | 'live'
+  >('both');
+  const [compromisePicks, setCompromisePicks] = useState<Record<string, 'A' | 'B'>>(
+    {}
+  );
   const historyRef = useRef<Scene[]>([]);
   const sceneRef = useRef<Scene | null>(null);
   const toastSeq = useRef(0);
@@ -168,9 +276,72 @@ export function SceneStoreProvider({
   const socketRef = useRef<WebSocket | null>(null);
   const selectedRef = useRef<string | null>(null);
   const actorIdRef = useRef(actorId);
+  const displayNameRef = useRef(displayName);
   const voiceRef = useRef(voice);
   const voiceMeshRef = useRef<VoiceMesh | null>(null);
   const presenceRef = useRef<PresenceUser[]>([]);
+  const poseRef = useRef<{
+    position: Vector3 | null;
+    lookDirection: Vector3 | null;
+  }>({ position: null, lookDirection: null });
+  const intentAutoOpenedRef = useRef(false);
+  const draftTimerRef = useRef<number | null>(null);
+
+  const actorColor = useMemo(() => colorFromId(actorId), [actorId]);
+
+  const setDisplayName = useCallback((name: string) => {
+    const next = (name.trim() || 'Guest').slice(0, 40);
+    setDisplayNameState(next);
+    persistDisplayName(next);
+    displayNameRef.current = next;
+    const sock = socketRef.current;
+    if (sock) {
+      sendScenePresence(sock, {
+        userId: actorIdRef.current,
+        displayName: next,
+        color: actorColor,
+        selectedObjectId: selectedRef.current,
+        voiceEnabled: voiceRef.current.enabled,
+        voiceSpeaking: voiceRef.current.speaking && !voiceRef.current.muted,
+        position: poseRef.current.position ?? undefined,
+        lookDirection: poseRef.current.lookDirection ?? undefined
+      });
+    }
+  }, [actorColor]);
+
+  const buildPresencePayload = useCallback(
+    (overrides?: {
+      selectedObjectId?: string | null;
+      voiceSpeaking?: boolean;
+      position?: Vector3 | null;
+      lookDirection?: Vector3 | null;
+    }) => {
+      const pos =
+        overrides?.position !== undefined
+          ? overrides.position
+          : poseRef.current.position;
+      const look =
+        overrides?.lookDirection !== undefined
+          ? overrides.lookDirection
+          : poseRef.current.lookDirection;
+      return {
+        userId: actorIdRef.current,
+        displayName: displayNameRef.current,
+        color: actorColor,
+        selectedObjectId:
+          overrides?.selectedObjectId !== undefined
+            ? overrides.selectedObjectId
+            : selectedRef.current,
+        voiceEnabled: voiceRef.current.enabled,
+        voiceSpeaking:
+          overrides?.voiceSpeaking ??
+          (voiceRef.current.speaking && !voiceRef.current.muted),
+        position: pos ?? undefined,
+        lookDirection: look ?? undefined
+      };
+    },
+    [actorColor]
+  );
 
   useEffect(() => {
     sceneRef.current = scene;
@@ -183,6 +354,10 @@ export function SceneStoreProvider({
   useEffect(() => {
     actorIdRef.current = actorId;
   }, [actorId]);
+
+  useEffect(() => {
+    displayNameRef.current = displayName;
+  }, [displayName]);
 
   useEffect(() => {
     voiceRef.current = voice;
@@ -238,13 +413,24 @@ export function SceneStoreProvider({
     setIsBusy(true);
     try {
       await fetchHealth();
-      const [nextScene, nextCatalog] = await Promise.all([
-        fetchScene(sceneId),
-        fetchCatalog()
-      ]);
+      const [nextScene, nextCatalog, nextTimeline, nextDisagreement] =
+        await Promise.all([
+          fetchScene(sceneId),
+          fetchCatalog(),
+          fetchTimeline(sceneId).catch(() => null),
+          fetchDisagreement(sceneId).catch(() => null)
+        ]);
       setScene(nextScene);
       sceneRef.current = nextScene;
       setCatalog(nextCatalog);
+      if (nextTimeline) setTimeline(nextTimeline.entries);
+      setDisagreement(
+        nextDisagreement &&
+          (nextDisagreement.status === 'open' ||
+            nextDisagreement.status === 'countered')
+          ? nextDisagreement
+          : null
+      );
       setConnection('connected');
       historyRef.current = [];
       setHistoryDepth(0);
@@ -260,6 +446,64 @@ export function SceneStoreProvider({
   useEffect(() => {
     void reload();
   }, [reload]);
+
+  const applyIntentSnapshot = useCallback(
+    (msg: {
+      intentOpen?: boolean;
+      draft?: IntentDraft | null;
+      ideas?: IntentIdea[];
+      idea?: IntentIdea;
+    }) => {
+      if (typeof msg.intentOpen === 'boolean') {
+        setIntentSessionActive(msg.intentOpen);
+      }
+      if (msg.draft !== undefined) {
+        setIntentDraft(msg.draft);
+      }
+      if (Array.isArray(msg.ideas)) {
+        setIntentIdeas(msg.ideas);
+      } else if (msg.idea) {
+        setIntentIdeas((prev) => {
+          if (prev.some((i) => i.ideaId === msg.idea!.ideaId)) return prev;
+          return [...prev, msg.idea!];
+        });
+      }
+    },
+    []
+  );
+
+  // First load after scan / demo room: primary intent modal (once per browser)
+  useEffect(() => {
+    if (!scene || connection === 'error' || connection === 'connecting') return;
+    if (intentAutoOpenedRef.current) return;
+    intentAutoOpenedRef.current = true;
+    let seen = false;
+    try {
+      seen = Boolean(localStorage.getItem(intentSeenKey(sceneId)));
+    } catch {
+      seen = false;
+    }
+    if (!seen) {
+      setIntentModalOpen(true);
+      setIntentSessionActive(true);
+    }
+  }, [scene, connection, sceneId]);
+
+  // Broadcast intent_open once WS is up and modal is showing (first-time + re-open)
+  useEffect(() => {
+    if (!intentModalOpen) return;
+    if (connection !== 'connected' && connection !== 'syncing') return;
+    const sock = socketRef.current;
+    if (!sock || sock.readyState !== WebSocket.OPEN) return;
+    sendIntentOpen(sock, {
+      actorId: actorIdRef.current,
+      displayName: displayNameRef.current,
+      prompt,
+      guestCount,
+      budget: targetBudget
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only on open / reconnect
+  }, [intentModalOpen, connection]);
 
   // WebSocket /ws/scene/{id} — patches, presence, locks, voice signal, drawing
   useEffect(() => {
@@ -284,14 +528,7 @@ export function SceneStoreProvider({
     const mesh = new VoiceMesh(
       actorIdRef.current,
       () => socketRef.current,
-      () => ({
-        userId: actorIdRef.current,
-        displayName: 'Web demo',
-        color: '#6ec8e8',
-        selectedObjectId: selectedRef.current,
-        voiceEnabled: voiceRef.current.enabled,
-        voiceSpeaking: voiceRef.current.speaking && !voiceRef.current.muted
-      }),
+      () => buildPresencePayload(),
       setVoice
     );
     voiceMeshRef.current = mesh;
@@ -300,14 +537,7 @@ export function SceneStoreProvider({
       onOpen: () => {
         if (closed) return;
         setConnection('connected');
-        sendSceneJoin(socket!, {
-          userId: actorIdRef.current,
-          displayName: 'Web demo',
-          color: '#6ec8e8',
-          selectedObjectId: selectedRef.current,
-          voiceEnabled: voiceRef.current.enabled,
-          voiceSpeaking: false
-        });
+        sendSceneJoin(socket!, buildPresencePayload({ voiceSpeaking: false }));
       },
       onClose: () => {
         if (!closed) setConnection((c) => (c === 'syncing' ? c : 'disconnected'));
@@ -331,6 +561,39 @@ export function SceneStoreProvider({
               }
             }
             setStrokes(parsed);
+          }
+          applyIntentSnapshot({
+            intentOpen: msg.intentOpen,
+            draft: msg.draft ?? null,
+            ideas: msg.ideas
+          });
+          if (msg.intentOpen) {
+            setIntentModalOpen(true);
+          }
+          if (Array.isArray(msg.timeline)) {
+            const parsed: TimelineEntry[] = [];
+            for (const raw of msg.timeline) {
+              try {
+                parsed.push(TimelineEntrySchema.parse(raw));
+              } catch {
+                // skip
+              }
+            }
+            setTimeline(parsed);
+          }
+          if (msg.disagreement !== undefined) {
+            if (msg.disagreement == null) {
+              setDisagreement(null);
+            } else {
+              try {
+                const d = DisagreementSchema.parse(msg.disagreement);
+                setDisagreement(
+                  d.status === 'open' || d.status === 'countered' ? d : null
+                );
+              } catch {
+                // ignore
+              }
+            }
           }
           applyRemoteScene(msg.scene);
           return;
@@ -390,6 +653,75 @@ export function SceneStoreProvider({
           }
           return;
         }
+        if (
+          msg.type === 'intent_open' ||
+          msg.type === 'intent_close' ||
+          msg.type === 'intent_draft' ||
+          msg.type === 'intent_idea' ||
+          msg.type === 'intent_snapshot'
+        ) {
+          applyIntentSnapshot({
+            intentOpen: msg.intentOpen,
+            draft: msg.draft,
+            ideas: msg.ideas,
+            idea: msg.idea
+          });
+          if (msg.type === 'intent_open' && msg.actorId !== actorIdRef.current) {
+            setIntentModalOpen(true);
+            pushToast('A friend opened Plan with friends', 'info');
+          }
+          if (msg.type === 'intent_idea' && msg.idea?.actorId !== actorIdRef.current) {
+            pushToast(`Idea from ${msg.idea?.displayName || 'friend'}`, 'info');
+          }
+          return;
+        }
+        if (msg.type === 'timeline') {
+          if (Array.isArray(msg.timeline)) {
+            const parsed: TimelineEntry[] = [];
+            for (const raw of msg.timeline) {
+              try {
+                parsed.push(TimelineEntrySchema.parse(raw));
+              } catch {
+                // skip
+              }
+            }
+            setTimeline(parsed);
+          } else if (msg.entry) {
+            try {
+              const entry = TimelineEntrySchema.parse(msg.entry);
+              setTimeline((prev) => {
+                if (prev.some((e) => e.entryId === entry.entryId)) return prev;
+                return [...prev, entry];
+              });
+            } catch {
+              // ignore
+            }
+          }
+          return;
+        }
+        if (msg.type === 'disagreement') {
+          if (msg.disagreement == null) {
+            setDisagreement(null);
+            return;
+          }
+          try {
+            const d = DisagreementSchema.parse(msg.disagreement);
+            if (d.status === 'open' || d.status === 'countered') {
+              setDisagreement(d);
+              if (d.proposalA.actorId !== actorIdRef.current) {
+                pushToast('Layout disagreement opened', 'info');
+              }
+            } else {
+              setDisagreement(null);
+              if (d.status === 'resolved') {
+                pushToast('Disagreement resolved', 'success');
+              }
+            }
+          } catch {
+            // ignore
+          }
+          return;
+        }
         if (msg.type === 'error' && msg.message) {
           // Avoid toast spam for transient RTC peer miss
           if (!String(msg.message).includes('not connected')) {
@@ -406,7 +738,26 @@ export function SceneStoreProvider({
       socketRef.current = null;
       socket?.close();
     };
-  }, [sceneId, connection === 'error', pushToast]);
+  }, [sceneId, connection === 'error', pushToast, applyIntentSnapshot, buildPresencePayload]);
+
+  const reportPresencePose = useCallback(
+    (position: Vector3, lookDirection?: Vector3 | null) => {
+      poseRef.current = {
+        position,
+        lookDirection: lookDirection ?? poseRef.current.lookDirection
+      };
+      const sock = socketRef.current;
+      if (!sock || sock.readyState !== WebSocket.OPEN) return;
+      sendScenePresence(
+        sock,
+        buildPresencePayload({
+          position,
+          lookDirection: lookDirection ?? poseRef.current.lookDirection
+        })
+      );
+    },
+    [buildPresencePayload]
+  );
 
   const setSelectedObjectIdWithLock = useCallback(
     (id: string | null) => {
@@ -422,17 +773,10 @@ export function SceneStoreProvider({
         sendSceneLock(sock, id, actor);
       }
       if (sock) {
-        sendScenePresence(sock, {
-          userId: actor,
-          displayName: 'Web demo',
-          color: '#6ec8e8',
-          selectedObjectId: id,
-          voiceEnabled: voiceRef.current.enabled,
-          voiceSpeaking: voiceRef.current.speaking && !voiceRef.current.muted
-        });
+        sendScenePresence(sock, buildPresencePayload({ selectedObjectId: id }));
       }
     },
-    []
+    [buildPresencePayload]
   );
 
   const toggleVoice = useCallback(async () => {
@@ -502,7 +846,10 @@ export function SceneStoreProvider({
   }, []);
 
   const commitOps = useCallback(
-    async (operations: SceneOperation[], opts?: { animate?: boolean; budget?: number }) => {
+    async (
+      operations: SceneOperation[],
+      opts?: { animate?: boolean; budget?: number; label?: string }
+    ) => {
       const current = sceneRef.current;
       if (!current) return;
       pushHistory(current);
@@ -535,6 +882,7 @@ export function SceneStoreProvider({
             baseVersion: current.version,
             actorId: actorIdRef.current,
             opId: opId(),
+            label: opts?.label,
             operations
           },
           opts?.budget
@@ -590,37 +938,111 @@ export function SceneStoreProvider({
   const deleteSelected = useCallback(async () => {
     if (!selectedObjectId || !scene) return;
     const obj = scene.objects.find((o) => o.id === selectedObjectId);
-    if (!obj || obj.movable === false) {
-      pushToast('Cannot delete immovable object', 'error');
+    if (!obj || !canManipulateObject(obj)) {
+      pushToast('Walls stay fixed — pick furniture to clear', 'error');
       return;
     }
+    const id = selectedObjectId;
     setSelectedObjectId(null);
-    await commitOps([{ type: 'DELETE_OBJECT', objectId: selectedObjectId }]);
-    pushToast(`Removed ${obj.type}`, 'success');
+    await commitOps([{ type: 'DELETE_OBJECT', objectId: id }]);
+    pushToast(
+      obj.source === 'existing'
+        ? `Cleared ${obj.type.replace(/_/g, ' ')} out of the way`
+        : `Removed ${obj.type.replace(/_/g, ' ')}`,
+      'success'
+    );
   }, [selectedObjectId, scene, commitOps, pushToast]);
 
-  const requestLayout = useCallback(async () => {
-    if (!scene) return;
-    setIsBusy(true);
-    setConnection('syncing');
+  const requestLayout = useCallback(
+    async (overrides?: { prompt?: string; guestCount?: number; budget?: number }) => {
+      if (!scene) return;
+      const nextPrompt = overrides?.prompt ?? prompt;
+      const nextGuests = overrides?.guestCount ?? guestCount;
+      const nextBudget = overrides?.budget ?? targetBudget;
+      if (overrides?.prompt != null) setPrompt(overrides.prompt);
+      if (overrides?.guestCount != null) setGuestCount(overrides.guestCount);
+      if (overrides?.budget != null) setTargetBudget(overrides.budget);
+      setIsBusy(true);
+      setConnection('syncing');
+      try {
+        const payload: LayoutRequest = {
+          sceneId: scene.sceneId,
+          prompt: nextPrompt,
+          guestCount: nextGuests,
+          budget: nextBudget
+        };
+        const layout = await postAiLayout(payload);
+        setPendingLayout(layout);
+        setConnection('connected');
+        pushToast(`AI ready: ${layout.scenario}`, 'success');
+      } catch (err) {
+        setConnection('error');
+        pushToast(err instanceof Error ? err.message : 'AI layout failed', 'error');
+      } finally {
+        setIsBusy(false);
+      }
+    },
+    [scene, prompt, guestCount, targetBudget, pushToast]
+  );
+
+  const markIntentSeen = useCallback(() => {
     try {
-      const payload: LayoutRequest = {
-        sceneId: scene.sceneId,
-        prompt,
-        guestCount,
-        budget: targetBudget
-      };
-      const layout = await postAiLayout(payload);
-      setPendingLayout(layout);
-      setConnection('connected');
-      pushToast(`AI ready: ${layout.scenario}`, 'success');
-    } catch (err) {
-      setConnection('error');
-      pushToast(err instanceof Error ? err.message : 'AI layout failed', 'error');
-    } finally {
-      setIsBusy(false);
+      localStorage.setItem(intentSeenKey(sceneId), '1');
+    } catch {
+      // ignore
     }
-  }, [scene, prompt, guestCount, targetBudget, pushToast]);
+  }, [sceneId]);
+
+  const openIntentModal = useCallback(() => {
+    setIntentModalOpen(true);
+    setIntentSessionActive(true);
+  }, []);
+
+  const closeIntentModal = useCallback(() => {
+    // Local dismiss only — keep friends' session alive unless they close too.
+    setIntentModalOpen(false);
+  }, []);
+
+  const broadcastIntentDraft = useCallback((partial: Partial<IntentDraft>) => {
+    const draft: IntentDraft = {
+      actorId: actorIdRef.current,
+      displayName: displayNameRef.current,
+      scenario: partial.scenario ?? null,
+      prompt: partial.prompt ?? null,
+      guestCount: partial.guestCount ?? null,
+      budget: partial.budget ?? null
+    };
+    setIntentDraft(draft);
+    if (draftTimerRef.current != null) {
+      window.clearTimeout(draftTimerRef.current);
+    }
+    draftTimerRef.current = window.setTimeout(() => {
+      const sock = socketRef.current;
+      if (sock) sendIntentDraft(sock, draft);
+    }, 220);
+  }, []);
+
+  const addIntentIdea = useCallback(
+    (text: string) => {
+      const trimmed = text.trim();
+      if (!trimmed || !scene) return;
+      const idea: IntentIdea = {
+        ideaId: `idea_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
+        sceneId: scene.sceneId,
+        actorId: actorIdRef.current,
+        displayName: displayNameRef.current,
+        text: trimmed.slice(0, 280),
+        createdAt: new Date().toISOString()
+      };
+      setIntentIdeas((prev) => {
+        if (prev.some((i) => i.ideaId === idea.ideaId)) return prev;
+        return [...prev, idea];
+      });
+      const sock = socketRef.current;
+      if (sock) sendIntentIdea(sock, idea);
+    },
+    [scene]
+  );
 
   const acceptLayout = useCallback(async () => {
     if (!pendingLayout?.operations.length) {
@@ -629,8 +1051,13 @@ export function SceneStoreProvider({
     }
     const ops = pendingLayout.operations;
     const budget = pendingLayout.constraints.budget ?? targetBudget;
+    const scenario = pendingLayout.scenario;
     setPendingLayout(null);
-    await commitOps(ops, { animate: true, budget });
+    await commitOps(ops, {
+      animate: true,
+      budget,
+      label: `AI accept · ${scenario}`
+    });
     pushToast('Layout applied', 'success');
   }, [pendingLayout, commitOps, targetBudget, pushToast]);
 
@@ -638,6 +1065,190 @@ export function SceneStoreProvider({
     setPendingLayout(null);
     pushToast('Layout discarded', 'info');
   }, [pushToast]);
+
+  const proposeDisagreement = useCallback(async () => {
+    if (!scene || !pendingLayout?.operations.length) {
+      pushToast('Generate a layout first, then Propose', 'info');
+      return;
+    }
+    setIsBusy(true);
+    try {
+      if (disagreement && (disagreement.status === 'open' || disagreement.status === 'countered')) {
+        const updated = await postDisagreementCounter(
+          scene.sceneId,
+          disagreement.disagreementId,
+          {
+            actorId: actorIdRef.current,
+            displayName: displayName,
+            label: `Alt · ${pendingLayout.scenario}`,
+            operations: pendingLayout.operations
+          }
+        );
+        setDisagreement(updated);
+        setPendingLayout(null);
+        pushToast('Counter-proposal sent', 'success');
+      } else {
+        const created = await postDisagreement(scene.sceneId, {
+          actorId: actorIdRef.current,
+          displayName: displayName,
+          label: `Proposal · ${pendingLayout.scenario}`,
+          operations: pendingLayout.operations,
+          baseVersion: scene.version
+        });
+        setDisagreement(created);
+        setPendingLayout(null);
+        setDisagreementView('both');
+        pushToast('Proposed for disagreement — open a 2nd tab', 'success');
+      }
+    } catch (err) {
+      pushToast(err instanceof Error ? err.message : 'Propose failed', 'error');
+    } finally {
+      setIsBusy(false);
+    }
+  }, [scene, pendingLayout, disagreement, displayName, pushToast]);
+
+  const counterDisagreement = useCallback(async () => {
+    await proposeDisagreement();
+  }, [proposeDisagreement]);
+
+  const setCompromisePick = useCallback((objectId: string, side: 'A' | 'B') => {
+    setCompromisePicks((prev) => ({ ...prev, [objectId]: side }));
+  }, []);
+
+  const compromiseDisagreement = useCallback(
+    async (mode: 'blend' | 'picks' | 'a' | 'b') => {
+      if (!scene || !disagreement) return;
+      setIsBusy(true);
+      try {
+        const result = await postDisagreementCompromise(
+          scene.sceneId,
+          disagreement.disagreementId,
+          {
+            actorId: actorIdRef.current,
+            displayName: displayName,
+            mode,
+            picks: mode === 'picks' ? compromisePicks : undefined
+          }
+        );
+        pushHistory(scene);
+        await animateToScene(scene, result.scene);
+        setDisagreement(null);
+        setCompromisePicks({});
+        setConnection('connected');
+        pushToast(
+          mode === 'blend'
+            ? 'Compromise blended'
+            : mode === 'picks'
+              ? 'Compromise applied (picks)'
+              : `Accepted proposal ${mode.toUpperCase()}`,
+          'success'
+        );
+      } catch (err) {
+        pushToast(err instanceof Error ? err.message : 'Compromise failed', 'error');
+      } finally {
+        setIsBusy(false);
+      }
+    },
+    [
+      scene,
+      disagreement,
+      compromisePicks,
+      displayName,
+      animateToScene,
+      pushHistory,
+      pushToast
+    ]
+  );
+
+  const cancelDisagreement = useCallback(async () => {
+    if (!scene || !disagreement) return;
+    setIsBusy(true);
+    try {
+      await postDisagreementResolve(scene.sceneId, disagreement.disagreementId, {
+        actorId: actorIdRef.current,
+        choice: 'cancel',
+        displayName: displayName
+      });
+      setDisagreement(null);
+      setCompromisePicks({});
+      pushToast('Disagreement cancelled', 'info');
+    } catch (err) {
+      pushToast(err instanceof Error ? err.message : 'Cancel failed', 'error');
+    } finally {
+      setIsBusy(false);
+    }
+  }, [scene, disagreement, displayName, pushToast]);
+
+  const restoreTimelineEntry = useCallback(
+    async (entryId: string) => {
+      if (!scene) return;
+      setIsBusy(true);
+      setConnection('syncing');
+      try {
+        pushHistory(scene);
+        const result = await postTimelineRestore(scene.sceneId, {
+          entryId,
+          actorId: actorIdRef.current,
+          displayName: displayName
+        });
+        await animateToScene(scene, result.scene, 520);
+        setConnection('connected');
+        pushToast('Restored timeline point', 'success');
+      } catch (err) {
+        setConnection('error');
+        pushToast(err instanceof Error ? err.message : 'Restore failed', 'error');
+      } finally {
+        setIsBusy(false);
+      }
+    },
+    [scene, displayName, animateToScene, pushHistory, pushToast]
+  );
+
+  const branchTimelineEntry = useCallback(
+    async (entryId: string, name: string) => {
+      if (!scene) return;
+      const trimmed = name.trim();
+      if (!trimmed) {
+        pushToast('Enter a branch name', 'info');
+        return;
+      }
+      setIsBusy(true);
+      try {
+        const result = await postTimelineBranch(scene.sceneId, {
+          entryId,
+          name: trimmed,
+          actorId: actorIdRef.current,
+          displayName: displayName
+        });
+        pushToast(
+          `Branch “${trimmed}” → ${result.branchSceneId} (open ?scene=…)`,
+          'success'
+        );
+        if (typeof window !== 'undefined') {
+          const url = new URL(window.location.href);
+          url.searchParams.set('scene', result.branchSceneId);
+          window.open(url.toString(), '_blank', 'noopener,noreferrer');
+        }
+      } catch (err) {
+        pushToast(err instanceof Error ? err.message : 'Branch failed', 'error');
+      } finally {
+        setIsBusy(false);
+      }
+    },
+    [scene, displayName, pushToast]
+  );
+
+  const ghostObjectsA = useMemo(() => {
+    if (!disagreement?.proposalA.scene) return [];
+    if (disagreementView === 'B' || disagreementView === 'live') return [];
+    return disagreement.proposalA.scene.objects;
+  }, [disagreement, disagreementView]);
+
+  const ghostObjectsB = useMemo(() => {
+    if (!disagreement?.proposalB?.scene) return [];
+    if (disagreementView === 'A' || disagreementView === 'live') return [];
+    return disagreement.proposalB.scene.objects;
+  }, [disagreement, disagreementView]);
 
   const addCatalogItem = useCallback(
     async (productId: string) => {
@@ -736,6 +1347,7 @@ export function SceneStoreProvider({
         baseVersion: current.version,
         actorId: actorIdRef.current,
         opId: opId(),
+        label: 'Undo',
         operations: ops
       });
       await animateToScene(current, result.scene, 420);
@@ -822,9 +1434,21 @@ export function SceneStoreProvider({
     animating,
     presence,
     actorId,
+    displayName,
+    setDisplayName,
     voice,
     drawMode,
     strokes,
+    intentModalOpen,
+    intentIdeas,
+    intentDraft,
+    intentSessionActive,
+    timeline,
+    disagreement,
+    disagreementView,
+    compromisePicks,
+    ghostObjectsA,
+    ghostObjectsB,
     setSelectedObjectId: setSelectedObjectIdWithLock,
     setPrompt,
     setTargetBudget,
@@ -838,6 +1462,14 @@ export function SceneStoreProvider({
     requestLayout,
     acceptLayout,
     rejectLayout,
+    proposeDisagreement,
+    counterDisagreement,
+    compromiseDisagreement,
+    cancelDisagreement,
+    setDisagreementView,
+    setCompromisePick,
+    restoreTimelineEntry,
+    branchTimelineEntry,
     addCatalogItem,
     checkout,
     undo,
@@ -847,6 +1479,12 @@ export function SceneStoreProvider({
     addStroke,
     clearOwnStrokes,
     clearAllStrokes,
+    openIntentModal,
+    closeIntentModal,
+    broadcastIntentDraft,
+    addIntentIdea,
+    markIntentSeen,
+    reportPresencePose,
     productMap,
     budgetUsed
   };

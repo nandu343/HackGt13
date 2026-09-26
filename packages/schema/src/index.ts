@@ -33,8 +33,9 @@ export const SceneObjectSchema = z.object({
   movable: z.boolean().optional(),
   transform: TransformSchema,
   dimensions: DimensionsSchema.optional(),
-  productId: z.string().optional(),
-  assetId: z.string().optional(),
+  // FastAPI/Pydantic serializes missing optionals as null — accept both.
+  productId: z.string().nullable().optional(),
+  assetId: z.string().nullable().optional(),
   lockedBy: z.string().nullable().optional(),
   lockedUntil: z.string().nullable().optional()
 });
@@ -86,6 +87,8 @@ export const OperationEnvelopeSchema = z.object({
   baseVersion: z.number().int().nonnegative(),
   actorId: z.string().optional(),
   opId: z.string().optional(),
+  /** Optional timeline label when ops are accepted. */
+  label: z.string().optional(),
   operations: z.array(SceneOperationSchema).min(1)
 });
 export type OperationEnvelope = z.infer<typeof OperationEnvelopeSchema>;
@@ -125,7 +128,22 @@ export const LayoutResponseSchema = z.object({
   /** Hybrid planner source: rules always; llm when XAI_API_KEY is set. */
   plannerMode: z.enum(['rules', 'llm']).optional(),
   /** Ops dropped or auto-clamped during postprocess validation. */
-  fixedOps: z.number().int().nonnegative().optional()
+  fixedOps: z.number().int().nonnegative().optional(),
+  /** Bang-for-buck product choices with light rationale. */
+  valuePicks: z
+    .array(
+      z.object({
+        productId: z.string(),
+        name: z.string().optional(),
+        score: z.number(),
+        reason: z.string(),
+        objectId: z.string().optional(),
+        replacedProductId: z.string().optional(),
+        rating: z.number().optional(),
+        price: z.number().optional()
+      })
+    )
+    .optional()
 });
 export type LayoutResponse = z.infer<typeof LayoutResponseSchema>;
 
@@ -135,16 +153,19 @@ export const ProductSchema = z.object({
   price: z.number().nonnegative(),
   currency: z.string().default('USD'),
   dimensions: DimensionsSchema.optional(),
-  assetId: z.string().optional(),
+  assetId: z.string().nullable().optional(),
   tags: z.array(z.string()).optional(),
   purchasable: z.boolean().default(true),
-  virtualOnly: z.boolean().default(false)
+  virtualOnly: z.boolean().default(false),
+  /** Customer rating 1–5 for bang-for-buck value scoring. */
+  rating: z.number().min(0).max(5).optional(),
+  qualityTier: z.enum(['budget', 'standard', 'premium']).optional()
 });
 export type Product = z.infer<typeof ProductSchema>;
 
 export const CatalogItemSchema = ProductSchema.extend({
-  category: z.string().optional(),
-  thumbnailUrl: z.string().optional()
+  category: z.string().nullable().optional(),
+  thumbnailUrl: z.string().nullable().optional()
 });
 export type CatalogItem = z.infer<typeof CatalogItemSchema>;
 
@@ -157,7 +178,11 @@ export const PresenceUserSchema = z.object({
   /** Mic joined — peers should negotiate WebRTC audio. */
   voiceEnabled: z.boolean().optional(),
   /** Local VAD / speaking indicator for presence UI. */
-  voiceSpeaking: z.boolean().optional()
+  voiceSpeaking: z.boolean().optional(),
+  /** Ghost avatar standing point in Y-up meters (orbit focus / presence cursor). */
+  position: Vector3Schema.optional(),
+  /** Optional facing / look direction (unit-ish vector). */
+  lookDirection: Vector3Schema.optional()
 });
 export type PresenceUser = z.infer<typeof PresenceUserSchema>;
 
@@ -232,5 +257,84 @@ export const OperationsResultSchema = z.object({
   warnings: z.array(z.string()).optional()
 });
 export type OperationsResult = z.infer<typeof OperationsResultSchema>;
+
+/** Version snapshot for collaborative history / restore / branch. */
+export const TimelineEntrySchema = z.object({
+  entryId: z.string(),
+  sceneId: z.string(),
+  version: z.number().int().nonnegative(),
+  label: z.string(),
+  actorId: z.string().nullable().optional(),
+  displayName: z.string().nullable().optional(),
+  branchId: z.string().default('main'),
+  parentEntryId: z.string().nullable().optional(),
+  createdAt: z.string(),
+  operations: z.array(SceneOperationSchema).nullable().optional(),
+  scene: SceneSchema
+});
+export type TimelineEntry = z.infer<typeof TimelineEntrySchema>;
+
+export const TimelineListSchema = z.object({
+  sceneId: z.string(),
+  branchId: z.string().default('main'),
+  entries: z.array(TimelineEntrySchema)
+});
+export type TimelineList = z.infer<typeof TimelineListSchema>;
+
+export const TimelineBranchResultSchema = z.object({
+  sourceSceneId: z.string(),
+  branchId: z.string(),
+  branchSceneId: z.string(),
+  entry: TimelineEntrySchema,
+  scene: SceneSchema
+});
+export type TimelineBranchResult = z.infer<typeof TimelineBranchResultSchema>;
+
+export const DisagreementProposalSchema = z.object({
+  actorId: z.string(),
+  displayName: z.string().nullable().optional(),
+  label: z.string().nullable().optional(),
+  operations: z.array(SceneOperationSchema).min(1),
+  scene: SceneSchema.nullable().optional(),
+  createdAt: z.string().nullable().optional()
+});
+export type DisagreementProposal = z.infer<typeof DisagreementProposalSchema>;
+
+export const DisagreementSchema = z.object({
+  disagreementId: z.string(),
+  sceneId: z.string(),
+  status: z.enum(['open', 'countered', 'resolved', 'cancelled']),
+  baseVersion: z.number().int().nonnegative(),
+  baseScene: SceneSchema,
+  proposalA: DisagreementProposalSchema,
+  proposalB: DisagreementProposalSchema.nullable().optional(),
+  createdAt: z.string(),
+  resolvedAt: z.string().nullable().optional(),
+  resolveMode: z.string().nullable().optional()
+});
+export type Disagreement = z.infer<typeof DisagreementSchema>;
+
+/** Shareable room invite — no hard peer cap on WS presence. */
+export const SceneInviteSchema = z.object({
+  token: z.string(),
+  sceneId: z.string(),
+  createdAt: z.string(),
+  createdBy: z.string().nullable().optional(),
+  label: z.string().nullable().optional()
+});
+export type SceneInvite = z.infer<typeof SceneInviteSchema>;
+
+export const SceneInviteListSchema = z.object({
+  sceneId: z.string(),
+  invites: z.array(SceneInviteSchema)
+});
+export type SceneInviteList = z.infer<typeof SceneInviteListSchema>;
+
+export const SceneInviteResolveSchema = z.object({
+  token: z.string(),
+  sceneId: z.string(),
+  joinPath: z.string()
+});
+export type SceneInviteResolve = z.infer<typeof SceneInviteResolveSchema>;
 
 export { demoScene, demoCatalog } from './seed';

@@ -121,6 +121,26 @@ actor APIClient {
         }
     }
 
+    /// POST /ai/layout — hybrid planner ops (not applied until client Accept).
+    func postAiLayout(_ payload: LayoutRequestDTO) async throws -> LayoutResponseDTO {
+        let url = APIConfig.baseURL.appending(path: "ai/layout")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        do {
+            request.httpBody = try encoder.encode(payload)
+        } catch {
+            throw APIClientError.encoding(error)
+        }
+        let (data, response) = try await session.data(for: request)
+        try Self.throwIfNeeded(response, data: data)
+        do {
+            return try decoder.decode(LayoutResponseDTO.self, from: data)
+        } catch {
+            throw APIClientError.decoding(error)
+        }
+    }
+
     private static func throwIfNeeded(_ response: URLResponse, data: Data) throws {
         guard let http = response as? HTTPURLResponse else { return }
         guard (200..<300).contains(http.statusCode) else {

@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 from ..models import ConstraintSet, LayoutRequest, LayoutResponse, Scene, SceneOperation
 from .classifier import Scenario, classify_scenario
+from .value_picker import pick_best_value
 
 if TYPE_CHECKING:
     from ..models import CatalogItem
@@ -21,24 +22,16 @@ def _pick(
     max_price: float | None = None,
     include_virtual: bool = False,
 ) -> CatalogItem | None:
-    candidates: list[CatalogItem] = []
-    for item in catalog.values():
-        if not include_virtual and (item.virtual_only or not item.purchasable):
-            continue
-        if max_price is not None and item.price > max_price:
-            continue
-        if category and item.category != category:
-            continue
-        if tags:
-            item_tags = set(item.tags or [])
-            if not item_tags.intersection(tags):
-                continue
-        candidates.append(item)
-    if not candidates:
-        return None
-    # Prefer cheaper purchasable props; stable by product_id
-    candidates.sort(key=lambda i: (i.price, i.product_id))
-    return candidates[0]
+    """Prefer high-rated / low-cost purchasable goods under max_price (budget remaining)."""
+    budget = max_price if max_price is not None else float('inf')
+    scored = pick_best_value(
+        catalog,
+        budget_remaining=budget,
+        tags=tags,
+        category=category,
+        prefer_purchasable=not include_virtual,
+    )
+    return scored.item if scored else None
 
 
 def _movable(scene: Scene) -> list:
