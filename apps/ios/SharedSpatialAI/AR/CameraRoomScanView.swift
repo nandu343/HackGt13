@@ -167,6 +167,9 @@ struct CameraRoomScanRepresentable: UIViewRepresentable {
         Coordinator(model: model)
     }
 
+    /// UI + `@MainActor` model live here; ARSessionDelegate entry points are `nonisolated`
+    /// and hop onto the main actor before touching `cornerEpoch` / overlays.
+    @MainActor
     final class Coordinator: NSObject, ARSessionDelegate {
         var model: CameraRoomScanModel
         weak var hostView: ARView?
@@ -187,56 +190,57 @@ struct CameraRoomScanRepresentable: UIViewRepresentable {
             cornerMarkers.removeAll()
         }
 
-        func session(_ session: ARSession, didAdd anchors: [ARAnchor]) {
-            for case let plane as ARPlaneAnchor in anchors {
-                upsert(plane)
-            }
-        }
-
-        func session(_ session: ARSession, didUpdate anchors: [ARAnchor]) {
-            for case let plane as ARPlaneAnchor in anchors {
-                upsert(plane)
-            }
-        }
-
-        func session(_ session: ARSession, didRemove anchors: [ARAnchor]) {
-            for case let plane as ARPlaneAnchor in anchors {
-                Task { @MainActor in
-                    model.removePlane(id: plane.identifier)
-                    planeEntities[plane.identifier]?.removeFromParent()
-                    planeEntities.removeValue(forKey: plane.identifier)
+        nonisolated func session(_ session: ARSession, didAdd anchors: [ARAnchor]) {
+            let updates = CameraScanPlaneUpdate.makeList(from: anchors)
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                for update in updates {
+                    self.upsert(update)
                 }
             }
         }
 
-        private func upsert(_ plane: ARPlaneAnchor) {
-            let alignment: DetectedPlaneSnapshot.Alignment =
-                plane.alignment == .vertical ? .vertical : .horizontal
-            let center = SIMD3<Float>(
-                plane.transform.columns.3.x,
-                plane.transform.columns.3.y,
-                plane.transform.columns.3.z
-            )
-            // Prefer planeExtent (iOS 16+) over deprecated `extent`.
-            let extent = SIMD3<Float>(
-                plane.planeExtent.width,
-                0,
-                plane.planeExtent.height
-            )
-            let snapshot = DetectedPlaneSnapshot(
-                center: center,
-                extent: extent,
-                transform: plane.transform,
-                alignment: alignment
-            )
-            Task { @MainActor in
-                model.upsertPlane(snapshot, id: plane.identifier)
-                updatePlaneVisual(plane: plane, extent: extent, alignment: alignment)
+        nonisolated func session(_ session: ARSession, didUpdate anchors: [ARAnchor]) {
+            let updates = CameraScanPlaneUpdate.makeList(from: anchors)
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                for update in updates {
+                    self.upsert(update)
+                }
             }
         }
 
+        nonisolated func session(_ session: ARSession, didRemove anchors: [ARAnchor]) {
+            let ids = anchors.compactMap { ($0 as? ARPlaneAnchor)?.identifier }
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                for id in ids {
+                    self.model.removePlane(id: id)
+                    self.planeEntities[id]?.removeFromParent()
+                    self.planeEntities.removeValue(forKey: id)
+                }
+            }
+        }
+
+        private func upsert(_ plane: CameraScanPlaneUpdate) {
+            let snapshot = DetectedPlaneSnapshot(
+                center: plane.center,
+                extent: plane.extent,
+                transform: plane.transform,
+                alignment: plane.alignment
+            )
+            model.upsertPlane(snapshot, id: plane.id)
+            updatePlaneVisual(
+                id: plane.id,
+                transform: plane.transform,
+                extent: plane.extent,
+                alignment: plane.alignment
+            )
+        }
+
         private func updatePlaneVisual(
-            plane: ARPlaneAnchor,
+            id: UUID,
+            transform: simd_float4x4,
             extent: SIMD3<Float>,
             alignment: DetectedPlaneSnapshot.Alignment
         ) {
@@ -252,14 +256,14 @@ struct CameraRoomScanRepresentable: UIViewRepresentable {
                 : .systemPurple.withAlphaComponent(0.22)
 
             // Replace mesh by recreating the entity (avoids fragile ModelComponent mutation).
-            planeEntities[plane.identifier]?.removeFromParent()
+            planeEntities[id]?.removeFromParent()
             let entity = ModelEntity(
                 mesh: .generatePlane(width: w, depth: h),
                 materials: [SimpleMaterial(color: color, isMetallic: false)]
             )
-            entity.name = "scan_plane_\(plane.identifier.uuidString)"
-            entity.transform = Transform(matrix: plane.transform)
-            planeEntities[plane.identifier] = entity
+            entity.name = "scan_plane_\(id.uuidString)"
+            entity.transform = Transform(matrix: transform)
+            planeEntities[id] = entity
             overlayRoot.addChild(entity)
         }
 
@@ -273,17 +277,13 @@ struct CameraRoomScanRepresentable: UIViewRepresentable {
                 alignment: .horizontal
             )
             guard let hit = results.first else {
-                Task { @MainActor in
-                    model.lastError = "Tap a detected floor or table plane to set a corner."
-                }
+                model.lastError = "Tap a detected floor or table plane to set a corner."
                 return
             }
             let p = hit.worldTransform.columns.3
             let point = SIMD3<Float>(p.x, p.y, p.z)
-            Task { @MainActor in
-                model.addCorner(point)
-                addCornerMarker(at: point)
-            }
+            model.addCorner(point)
+            addCornerMarker(at: point)
         }
 
         private func addCornerMarker(at point: SIMD3<Float>) {
@@ -299,6 +299,37 @@ struct CameraRoomScanRepresentable: UIViewRepresentable {
             marker.name = "scan_corner_\(cornerMarkers.count)"
             overlayRoot.addChild(marker)
             cornerMarkers.append(marker)
+        }
+    }
+}
+
+/// Sendable plane snapshot extracted on the AR session queue before MainActor work.
+/// Kept outside `@MainActor` Coordinator so it does not inherit actor isolation.
+private struct CameraScanPlaneUpdate: Sendable {
+    let id: UUID
+    let center: SIMD3<Float>
+    let extent: SIMD3<Float>
+    let transform: simd_float4x4
+    let alignment: DetectedPlaneSnapshot.Alignment
+
+    static func makeList(from anchors: [ARAnchor]) -> [CameraScanPlaneUpdate] {
+        anchors.compactMap { anchor -> CameraScanPlaneUpdate? in
+            guard let plane = anchor as? ARPlaneAnchor else { return nil }
+            let transform = plane.transform
+            let alignment: DetectedPlaneSnapshot.Alignment =
+                plane.alignment == .vertical ? .vertical : .horizontal
+            // Prefer planeExtent (iOS 16+) over deprecated `extent`.
+            return CameraScanPlaneUpdate(
+                id: plane.identifier,
+                center: SIMD3(
+                    transform.columns.3.x,
+                    transform.columns.3.y,
+                    transform.columns.3.z
+                ),
+                extent: SIMD3(plane.planeExtent.width, 0, plane.planeExtent.height),
+                transform: transform,
+                alignment: alignment
+            )
         }
     }
 }

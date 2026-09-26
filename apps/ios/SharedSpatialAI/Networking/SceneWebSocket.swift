@@ -70,7 +70,8 @@ final class SceneWebSocket {
     private func receiveNext() {
         guard receiveLoopRunning, let task else { return }
         task.receive { [weak self] result in
-            Task { @MainActor in
+            // URLSession delivers off the main actor; hop before touching callbacks / state.
+            Task { @MainActor [weak self] in
                 guard let self else { return }
                 switch result {
                 case .failure:

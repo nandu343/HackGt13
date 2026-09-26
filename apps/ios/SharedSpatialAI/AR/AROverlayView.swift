@@ -59,6 +59,8 @@ struct ARViewContainer: UIViewRepresentable {
         Coordinator(parent: self)
     }
 
+    /// Gesture callbacks and store closures must stay on the main actor (Swift 6).
+    @MainActor
     final class Coordinator: NSObject {
         var parent: ARViewContainer
         var root: AnchorEntity?
@@ -169,6 +171,7 @@ struct ARViewContainer: UIViewRepresentable {
         }
     }
 
+    @MainActor
     private func rebuild(in view: ARView, coordinator: Coordinator) {
         guard let root = coordinator.root else { return }
         let version = scene?.version ?? -1

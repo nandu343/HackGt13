@@ -50,6 +50,8 @@ struct SceneRealityView: UIViewRepresentable {
         Coordinator()
     }
 
+    /// Map gestures invoke `@MainActor` SceneSyncStore closures — keep Coordinator isolated.
+    @MainActor
     final class Coordinator: NSObject {
         var root: AnchorEntity?
         var camera: PerspectiveCamera?
@@ -122,6 +124,7 @@ struct SceneRealityView: UIViewRepresentable {
         }
     }
 
+    @MainActor
     private func rebuild(coordinator: Coordinator) {
         guard let root = coordinator.root else { return }
         let version = scene?.version ?? -1
