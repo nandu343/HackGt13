@@ -19,6 +19,13 @@ struct SceneRealityView: UIViewRepresentable {
         if let root = context.coordinator.root {
             view.scene.addAnchor(root)
         }
+        // Non-AR mode: viewpoint comes from a PerspectiveCamera entity (cameraTransform is get-only).
+        let camera = PerspectiveCamera()
+        camera.camera = PerspectiveCameraComponent(near: 0.01, far: 100, fieldOfViewInDegrees: 60)
+        let cameraAnchor = AnchorEntity(world: .zero)
+        cameraAnchor.addChild(camera)
+        view.scene.addAnchor(cameraAnchor)
+        context.coordinator.camera = camera
         let tap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleTap(_:)))
         view.addGestureRecognizer(tap)
         let pan = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handlePan(_:)))
@@ -28,7 +35,7 @@ struct SceneRealityView: UIViewRepresentable {
         context.coordinator.onSelect = onSelect
         context.coordinator.onStrokeComplete = onStrokeComplete
         context.coordinator.drawMode = drawMode
-        rebuild(in: view, coordinator: context.coordinator)
+        rebuild(coordinator: context.coordinator)
         return view
     }
 
@@ -36,7 +43,7 @@ struct SceneRealityView: UIViewRepresentable {
         context.coordinator.onSelect = onSelect
         context.coordinator.onStrokeComplete = onStrokeComplete
         context.coordinator.drawMode = drawMode
-        rebuild(in: uiView, coordinator: context.coordinator)
+        rebuild(coordinator: context.coordinator)
     }
 
     func makeCoordinator() -> Coordinator {
@@ -45,6 +52,7 @@ struct SceneRealityView: UIViewRepresentable {
 
     final class Coordinator: NSObject {
         var root: AnchorEntity?
+        var camera: PerspectiveCamera?
         weak var hostView: ARView?
         var onSelect: ((String?) -> Void)?
         var onStrokeComplete: (([Vector3]) -> Void)?
@@ -114,7 +122,7 @@ struct SceneRealityView: UIViewRepresentable {
         }
     }
 
-    private func rebuild(in view: ARView, coordinator: Coordinator) {
+    private func rebuild(coordinator: Coordinator) {
         guard let root = coordinator.root else { return }
         let version = scene?.version ?? -1
         let count = scene?.objects.count ?? -1
@@ -163,15 +171,18 @@ struct SceneRealityView: UIViewRepresentable {
             root.addChild(makeGhostEntity(ghost))
         }
 
-        var cam = Transform()
-        cam.translation = SIMD3(
-            Float(scene.bounds.width) * 0.45,
-            Float(max(scene.bounds.height * 0.75, 1.6)),
-            Float(scene.bounds.length) * 1.05
-        )
-        cam.rotation = simd_quatf(angle: -0.42, axis: SIMD3(1, 0, 0))
-            * simd_quatf(angle: 0.35, axis: SIMD3(0, 1, 0))
-        view.cameraTransform = cam
+        // Orbit the PerspectiveCamera over the room (do not assign ARView.cameraTransform).
+        if let camera = coordinator.camera {
+            var cam = Transform()
+            cam.translation = SIMD3(
+                Float(scene.bounds.width) * 0.45,
+                Float(max(scene.bounds.height * 0.75, 1.6)),
+                Float(scene.bounds.length) * 1.05
+            )
+            cam.rotation = simd_quatf(angle: -0.42, axis: SIMD3(1, 0, 0))
+                * simd_quatf(angle: 0.35, axis: SIMD3(0, 1, 0))
+            camera.transform = cam
+        }
     }
 
     private func addFloorGrid(to root: AnchorEntity, bounds: RoomBoundsDTO) {
@@ -285,13 +296,15 @@ struct SceneRealityView: UIViewRepresentable {
             parent.addChild(seat)
             parent.addChild(back)
         case "floor_lamp", "lamp":
+            // MeshResource.generateCylinder is iOS 18+; use boxes for iOS 17 deployment.
             let pole = ModelEntity(
-                mesh: .generateCylinder(height: h * 0.85, radius: 0.03),
+                mesh: .generateBox(width: 0.06, height: h * 0.85, depth: 0.06),
                 materials: [mat]
             )
             pole.name = object.id
+            let shadeR = max(w, d) * 0.35
             let shade = ModelEntity(
-                mesh: .generateCylinder(height: h * 0.2, radius: max(w, d) * 0.35),
+                mesh: .generateBox(width: shadeR * 2, height: h * 0.2, depth: shadeR * 2),
                 materials: [SimpleMaterial(color: .systemYellow, isMetallic: false)]
             )
             shade.position.y = h * 0.4
@@ -346,8 +359,9 @@ struct SceneRealityView: UIViewRepresentable {
         }
         let tint = UIColor(hex: user.color ?? "#6eb4c8") ?? .systemTeal
         let opacity: CGFloat = user.voiceSpeaking == true ? 0.55 : 0.35
+        // Capsule approx without generateCylinder (iOS 18+).
         let body = ModelEntity(
-            mesh: .generateCylinder(height: 0.7, radius: 0.16),
+            mesh: .generateBox(width: 0.32, height: 0.7, depth: 0.32),
             materials: [SimpleMaterial(color: tint.withAlphaComponent(opacity), isMetallic: false)]
         )
         body.name = "ghost_\(user.userId)"

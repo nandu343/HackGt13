@@ -237,8 +237,9 @@ struct ARViewContainer: UIViewRepresentable {
             parent.position = Coordinates.toSIMD(pos)
         }
         let tint = UIColor(hex: user.color ?? "#6eb4c8") ?? .systemTeal
+        // generateCylinder is iOS 18+; box stands in for iOS 17 deployment target.
         let body = ModelEntity(
-            mesh: .generateCylinder(height: 0.7, radius: 0.16),
+            mesh: .generateBox(width: 0.32, height: 0.7, depth: 0.32),
             materials: [SimpleMaterial(color: tint.withAlphaComponent(0.35), isMetallic: false)]
         )
         body.name = parent.name

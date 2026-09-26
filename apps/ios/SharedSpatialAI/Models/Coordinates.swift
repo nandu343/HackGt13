@@ -20,7 +20,13 @@ enum Coordinates {
 
     /// Extract rotation as schema quaternion `[x, y, z, w]` from a 4x4 matrix.
     static func rotation(from matrix: simd_float4x4) -> Quaternion {
-        let q = simd_quatf(matrix)
+        // simd_quatf only accepts a 3×3 rotation matrix, not float4x4.
+        let rot = simd_float3x3(
+            SIMD3(matrix.columns.0.x, matrix.columns.0.y, matrix.columns.0.z),
+            SIMD3(matrix.columns.1.x, matrix.columns.1.y, matrix.columns.1.z),
+            SIMD3(matrix.columns.2.x, matrix.columns.2.y, matrix.columns.2.z)
+        )
+        let q = simd_quatf(rot)
         return Quaternion(
             x: Double(q.vector.x),
             y: Double(q.vector.y),

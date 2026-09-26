@@ -47,7 +47,8 @@ final class RoomCaptureViewController: UIViewController, RoomCaptureViewDelegate
             target: self,
             action: #selector(doneTapped)
         )
-        bar.items = [cancel, .flexibleSpace(), done]
+        let flex = UIBarButtonItem(barButtonSystemItem: .flexibleSpace, target: nil, action: nil)
+        bar.items = [cancel, flex, done]
         view.addSubview(bar)
         NSLayoutConstraint.activate([
             bar.leadingAnchor.constraint(equalTo: view.leadingAnchor),
