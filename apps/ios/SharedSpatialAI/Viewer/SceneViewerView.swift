@@ -134,11 +134,18 @@ struct SceneRealityView: UIViewRepresentable {
             }
         }
 
+        /// Map-space draw ray using our PerspectiveCamera (avoids ARView.cameraTransform).
         private func mapSpacePoint(at screen: CGPoint, in view: ARView) -> Vector3? {
-            let cam = view.cameraTransform
-            let camPos = cam.translation
             let size = view.bounds.size
             guard size.width > 1, size.height > 1 else { return nil }
+            // Prefer explicit camera entity; fall back to ray(through:) when available.
+            if let ray = view.ray(through: screen) {
+                let world = ray.origin + normalize(ray.direction) * 2.2
+                return Vector3(Double(world.x), Double(world.y), Double(world.z))
+            }
+            guard let camEntity = camera else { return nil }
+            let cam = camEntity.transform
+            let camPos = cam.translation
             let ndcX = Float((2 * screen.x / size.width) - 1)
             let ndcY = Float(1 - (2 * screen.y / size.height))
             let q = cam.rotation
@@ -499,10 +506,20 @@ struct ARRoomView: View {
     // MARK: Selection
 
     private func selectionCard(_ obj: SceneObjectDTO) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        let product = obj.productId.flatMap { store.catalogItem(productId: $0) }
+        let title = product?.name
+            ?? obj.type.replacingOccurrences(of: "_", with: " ").capitalized
+        return VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text(obj.type.replacingOccurrences(of: "_", with: " ").capitalized)
-                    .font(.subheadline.weight(.semibold))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.subheadline.weight(.semibold))
+                    if let dims = obj.dimensions {
+                        Text(String(format: "%.2f × %.2f × %.2f m", dims.width, dims.height, dims.depth))
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.tertiary)
+                    }
+                }
                 if obj.source == "existing" {
                     Text("SCANNED")
                         .font(.caption2.weight(.bold))
@@ -549,11 +566,17 @@ struct ARRoomView: View {
 
     private var bottomBar: some View {
         VStack(spacing: 8) {
+            if store.isBusy {
+                ProgressView()
+                    .controlSize(.small)
+                    .tint(.cyan)
+            }
             if let err = store.lastError {
                 Text(err)
                     .font(.caption2)
                     .foregroundStyle(.red)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .lineLimit(3)
             } else {
                 Text(store.statusMessage)
                     .font(.caption)

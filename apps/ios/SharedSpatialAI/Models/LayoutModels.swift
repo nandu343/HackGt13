@@ -50,6 +50,8 @@ struct CatalogItemDTO: Codable, Equatable, Identifiable, Sendable {
     var dimensions: DimensionsDTO?
     var assetId: String?
     var modelUrl: String?
+    /// Short shop blurb (optional).
+    var description: String?
     /// Retailer product page — “Open website” in Plan / Shop.
     var productUrl: String?
     /// Alias some feeds use; prefer `productUrl`.
@@ -64,6 +66,17 @@ struct CatalogItemDTO: Codable, Equatable, Identifiable, Sendable {
     var thumbnailUrl: String?
 
     var id: String { productId }
+
+    /// Prefer explicit description; otherwise derive a short line from tags + dimensions.
+    var descriptionText: String? {
+        if let description, !description.isEmpty { return description }
+        var parts: [String] = []
+        if let tier = qualityTier { parts.append(tier.capitalized) }
+        if let tags, !tags.isEmpty {
+            parts.append(tags.prefix(3).joined(separator: " · "))
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
 
     /// Prefer productUrl, fall back to websiteUrl.
     var openWebsiteURL: URL? {

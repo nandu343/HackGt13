@@ -139,8 +139,30 @@ final class SceneSyncStore {
         if !force, !catalog.isEmpty { return }
         do {
             catalog = try await APIClient.shared.fetchCatalog()
+            if lastError?.contains("Cannot reach API") == true {
+                lastError = nil
+            }
         } catch {
             lastError = error.localizedDescription
+            statusMessage = "Catalog unavailable"
+        }
+    }
+
+    /// Probe API from Settings — clear success / actionable failure.
+    func testConnection() async -> Bool {
+        isBusy = true
+        lastError = nil
+        defer { isBusy = false }
+        do {
+            try await APIClient.shared.healthPing()
+            statusMessage = "API OK · \(APIConfig.baseURL.absoluteString)"
+            connectRealtime()
+            return true
+        } catch {
+            lastError = error.localizedDescription
+            statusMessage = "API unreachable"
+            wsConnected = false
+            return false
         }
     }
 

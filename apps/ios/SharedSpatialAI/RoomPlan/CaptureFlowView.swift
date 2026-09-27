@@ -207,6 +207,14 @@ struct CaptureFlowView: View {
 
     private var statusBlock: some View {
         VStack(alignment: .leading, spacing: 6) {
+            if store.isBusy {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("Talking to API…")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
             Text(store.statusMessage)
                 .font(.caption)
             Text("Scene \(store.sceneId) · \(APIConfig.baseURL.absoluteString)")
@@ -220,6 +228,7 @@ struct CaptureFlowView: View {
                 Text(err)
                     .font(.caption)
                     .foregroundStyle(.red)
+                    .textSelection(.enabled)
             }
             if store.scene == nil && store.lastError == nil {
                 Text("No room map yet — scan with camera, use demo, or load from API.")

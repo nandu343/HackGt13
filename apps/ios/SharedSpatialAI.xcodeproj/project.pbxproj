@@ -21,6 +21,7 @@
 		B10016 /* CameraRoomScanView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10016 /* CameraRoomScanView.swift */; };
 		B10017 /* CameraScanExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10017 /* CameraScanExporter.swift */; };
 		B10018 /* FurnitureMeshBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10018 /* FurnitureMeshBuilder.swift */; };
+		B1001A /* ProductModelCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1001A /* ProductModelCatalog.swift */; };
 		B1000C /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = F1000C /* Assets.xcassets */; };
 		B1000D /* RoomPlan.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F1000D /* RoomPlan.framework */; };
 		B1000E /* RealityKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F1000E /* RealityKit.framework */; };
@@ -48,6 +49,7 @@
 		F10016 /* CameraRoomScanView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraRoomScanView.swift; sourceTree = "<group>"; };
 		F10017 /* CameraScanExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraScanExporter.swift; sourceTree = "<group>"; };
 		F10018 /* FurnitureMeshBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FurnitureMeshBuilder.swift; sourceTree = "<group>"; };
+		F1001A /* ProductModelCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductModelCatalog.swift; sourceTree = "<group>"; };
 		F1000C /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		F1000D /* RoomPlan.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = RoomPlan.framework; path = System/Library/Frameworks/RoomPlan.framework; sourceTree = SDKROOT; };
 		F1000E /* RealityKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = RealityKit.framework; path = System/Library/Frameworks/RealityKit.framework; sourceTree = SDKROOT; };
@@ -155,6 +157,7 @@
 			children = (
 				F1000B /* AROverlayView.swift */,
 				F10018 /* FurnitureMeshBuilder.swift */,
+				F1001A /* ProductModelCatalog.swift */,
 				F10016 /* CameraRoomScanView.swift */,
 				F10017 /* CameraScanExporter.swift */,
 			);
@@ -274,6 +277,7 @@
 				B1000A /* SceneViewerView.swift in Sources */,
 				B1000B /* AROverlayView.swift in Sources */,
 				B10018 /* FurnitureMeshBuilder.swift in Sources */,
+				B1001A /* ProductModelCatalog.swift in Sources */,
 				B10016 /* CameraRoomScanView.swift in Sources */,
 				B10017 /* CameraScanExporter.swift in Sources */,
 				B10012 /* LayoutModels.swift in Sources */,

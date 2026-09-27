@@ -58,6 +58,8 @@ class Product(CamelModel):
     asset_id: str | None = None
     # Public web path to GLB (or USDZ for iOS) e.g. /models/sofa.glb
     model_url: str | None = None
+    # Short shop blurb for catalog / Place picker.
+    description: str | None = None
     # Retailer product page — Shop / Recommendations "Open website".
     product_url: str | None = None
     website_url: str | None = None

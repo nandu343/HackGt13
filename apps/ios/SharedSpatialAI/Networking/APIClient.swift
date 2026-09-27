@@ -5,17 +5,30 @@ enum APIClientError: LocalizedError {
     case decoding(Error)
     case encoding(Error)
     case conflict(String)
+    case unreachable(String)
+    case invalidURL
 
     var errorDescription: String? {
         switch self {
         case .badStatus(let code, let body):
-            return "HTTP \(code): \(body)"
-        case .decoding(let error):
-            return "Decode failed: \(error.localizedDescription)"
-        case .encoding(let error):
-            return "Encode failed: \(error.localizedDescription)"
-        case .conflict(let message):
-            return "Version conflict: \(message)"
+            let snippet = body.prefix(120)
+            if code == 404 {
+                return "Not found (HTTP 404). Check Scene ID in Settings."
+            }
+            if code >= 500 {
+                return "API error \(code). Is the server running?"
+            }
+            return "HTTP \(code): \(snippet)"
+        case .decoding:
+            return "Unexpected API response — check the server is Shared Spatial AI."
+        case .encoding:
+            return "Could not encode request."
+        case .conflict:
+            return "Scene version conflict — refreshed; try again."
+        case .unreachable(let detail):
+            return "Cannot reach API at \(APIConfig.baseURL.absoluteString). \(detail)"
+        case .invalidURL:
+            return "Invalid API URL in Settings."
         }
     }
 }
@@ -28,63 +41,48 @@ actor APIClient {
     private let decoder: JSONDecoder
     private let encoder: JSONEncoder
 
-    init(session: URLSession = .shared) {
-        self.session = session
+    init(session: URLSession? = nil) {
+        if let session {
+            self.session = session
+        } else {
+            let config = URLSessionConfiguration.default
+            config.timeoutIntervalForRequest = 20
+            config.timeoutIntervalForResource = 45
+            config.waitsForConnectivity = false
+            self.session = URLSession(configuration: config)
+        }
         self.decoder = JSONDecoder()
         self.encoder = JSONEncoder()
     }
 
     func fetchScene(sceneId: String) async throws -> SceneDTO {
-        let url = APIConfig.baseURL.appending(path: "scene/\(sceneId)")
-        let (data, response) = try await session.data(from: url)
-        try Self.throwIfNeeded(response, data: data)
-        do {
-            return try decoder.decode(SceneDTO.self, from: data)
-        } catch {
-            throw APIClientError.decoding(error)
-        }
+        let url = try endpoint("scene/\(sceneId)")
+        let data = try await data(from: url)
+        return try decode(SceneDTO.self, from: data)
     }
 
-    /// POST a full normalized scene (RoomPlan export). Matches `POST /scene`.
+    /// POST a full normalized scene (scan / demo export). Matches `POST /scene`.
     @discardableResult
     func postScene(_ scene: SceneDTO) async throws -> SceneDTO {
-        let url = APIConfig.baseURL.appending(path: "scene")
+        let url = try endpoint("scene")
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        do {
-            request.httpBody = try encoder.encode(scene)
-        } catch {
-            throw APIClientError.encoding(error)
-        }
-        let (data, response) = try await session.data(for: request)
-        try Self.throwIfNeeded(response, data: data)
-        do {
-            return try decoder.decode(SceneDTO.self, from: data)
-        } catch {
-            throw APIClientError.decoding(error)
-        }
+        request.httpBody = try encode(scene)
+        let data = try await data(for: request)
+        return try decode(SceneDTO.self, from: data)
     }
 
     /// PUT replace for an existing id. Matches `PUT /scene/{sceneId}`.
     @discardableResult
     func putScene(_ scene: SceneDTO) async throws -> SceneDTO {
-        let url = APIConfig.baseURL.appending(path: "scene/\(scene.sceneId)")
+        let url = try endpoint("scene/\(scene.sceneId)")
         var request = URLRequest(url: url)
         request.httpMethod = "PUT"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        do {
-            request.httpBody = try encoder.encode(scene)
-        } catch {
-            throw APIClientError.encoding(error)
-        }
-        let (data, response) = try await session.data(for: request)
-        try Self.throwIfNeeded(response, data: data)
-        do {
-            return try decoder.decode(SceneDTO.self, from: data)
-        } catch {
-            throw APIClientError.decoding(error)
-        }
+        request.httpBody = try encode(scene)
+        let data = try await data(for: request)
+        return try decode(SceneDTO.self, from: data)
     }
 
     func applyOperations(
@@ -93,7 +91,7 @@ actor APIClient {
         operations: [SceneOperationDTO],
         actorId: String = APIConfig.actorId
     ) async throws -> OperationsResultDTO {
-        let url = APIConfig.baseURL.appending(path: "scene/\(sceneId)/operations")
+        let url = try endpoint("scene/\(sceneId)/operations")
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -103,59 +101,53 @@ actor APIClient {
             opId: UUID().uuidString,
             operations: operations
         )
+        request.httpBody = try encode(envelope)
         do {
-            request.httpBody = try encoder.encode(envelope)
+            let (data, response) = try await session.data(for: request)
+            if let http = response as? HTTPURLResponse, http.statusCode == 409 {
+                let body = String(data: data, encoding: .utf8) ?? ""
+                throw APIClientError.conflict(body)
+            }
+            try Self.throwIfNeeded(response, data: data)
+            return try decode(OperationsResultDTO.self, from: data)
+        } catch let error as APIClientError {
+            throw error
         } catch {
-            throw APIClientError.encoding(error)
-        }
-        let (data, response) = try await session.data(for: request)
-        if let http = response as? HTTPURLResponse, http.statusCode == 409 {
-            let body = String(data: data, encoding: .utf8) ?? ""
-            throw APIClientError.conflict(body)
-        }
-        try Self.throwIfNeeded(response, data: data)
-        do {
-            return try decoder.decode(OperationsResultDTO.self, from: data)
-        } catch {
-            throw APIClientError.decoding(error)
+            throw mapTransport(error)
         }
     }
 
     /// GET /catalog — full product list (name, price, modelUrl, productUrl).
     func fetchCatalog() async throws -> [CatalogItemDTO] {
-        let url = APIConfig.baseURL.appending(path: "catalog")
-        let (data, response) = try await session.data(from: url)
-        try Self.throwIfNeeded(response, data: data)
-        do {
-            return try decoder.decode([CatalogItemDTO].self, from: data)
-        } catch {
-            throw APIClientError.decoding(error)
-        }
+        let url = try endpoint("catalog")
+        let data = try await data(from: url)
+        return try decode([CatalogItemDTO].self, from: data)
+    }
+
+    /// Lightweight connectivity probe for Settings / scan gate.
+    func healthPing() async throws {
+        let url = try endpoint("catalog")
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.timeoutInterval = 8
+        _ = try await data(for: request)
     }
 
     /// POST /ai/layout — hybrid planner ops (not applied until client Accept).
     func postAiLayout(_ payload: LayoutRequestDTO) async throws -> LayoutResponseDTO {
-        let url = APIConfig.baseURL.appending(path: "ai/layout")
+        let url = try endpoint("ai/layout")
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        do {
-            request.httpBody = try encoder.encode(payload)
-        } catch {
-            throw APIClientError.encoding(error)
-        }
-        let (data, response) = try await session.data(for: request)
-        try Self.throwIfNeeded(response, data: data)
-        do {
-            return try decoder.decode(LayoutResponseDTO.self, from: data)
-        } catch {
-            throw APIClientError.decoding(error)
-        }
+        request.timeoutInterval = 60
+        request.httpBody = try encode(payload)
+        let data = try await data(for: request)
+        return try decode(LayoutResponseDTO.self, from: data)
     }
 
     /// POST /scene/{id}/invites — shareable join token for the web twin.
     func createInvite(sceneId: String, label: String? = nil) async throws -> SceneInviteDTO {
-        let url = APIConfig.baseURL.appending(path: "scene/\(sceneId)/invites")
+        let url = try endpoint("scene/\(sceneId)/invites")
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -163,32 +155,82 @@ actor APIClient {
             var actorId: String
             var label: String?
         }
+        request.httpBody = try encode(Body(actorId: APIConfig.actorId, label: label))
+        let data = try await data(for: request)
+        return try decode(SceneInviteDTO.self, from: data)
+    }
+
+    /// GET /scene/{id}/invites/default
+    func defaultInvite(sceneId: String) async throws -> SceneInviteDTO {
+        let url = try endpoint("scene/\(sceneId)/invites/default")
+        let data = try await data(from: url)
+        return try decode(SceneInviteDTO.self, from: data)
+    }
+
+    // MARK: - Internals
+
+    private func endpoint(_ path: String) throws -> URL {
+        let base = APIConfig.baseURL
+        guard base.scheme != nil else { throw APIClientError.invalidURL }
+        let trimmed = path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        return base.appending(path: trimmed)
+    }
+
+    private func data(from url: URL) async throws -> Data {
         do {
-            request.httpBody = try encoder.encode(
-                Body(actorId: APIConfig.actorId, label: label)
-            )
+            let (data, response) = try await session.data(from: url)
+            try Self.throwIfNeeded(response, data: data)
+            return data
+        } catch let error as APIClientError {
+            throw error
+        } catch {
+            throw mapTransport(error)
+        }
+    }
+
+    private func data(for request: URLRequest) async throws -> Data {
+        do {
+            let (data, response) = try await session.data(for: request)
+            try Self.throwIfNeeded(response, data: data)
+            return data
+        } catch let error as APIClientError {
+            throw error
+        } catch {
+            throw mapTransport(error)
+        }
+    }
+
+    private func encode<T: Encodable>(_ value: T) throws -> Data {
+        do {
+            return try encoder.encode(value)
         } catch {
             throw APIClientError.encoding(error)
         }
-        let (data, response) = try await session.data(for: request)
-        try Self.throwIfNeeded(response, data: data)
+    }
+
+    private func decode<T: Decodable>(_ type: T.Type, from data: Data) throws -> T {
         do {
-            return try decoder.decode(SceneInviteDTO.self, from: data)
+            return try decoder.decode(type, from: data)
         } catch {
             throw APIClientError.decoding(error)
         }
     }
 
-    /// GET /scene/{id}/invites/default
-    func defaultInvite(sceneId: String) async throws -> SceneInviteDTO {
-        let url = APIConfig.baseURL.appending(path: "scene/\(sceneId)/invites/default")
-        let (data, response) = try await session.data(from: url)
-        try Self.throwIfNeeded(response, data: data)
-        do {
-            return try decoder.decode(SceneInviteDTO.self, from: data)
-        } catch {
-            throw APIClientError.decoding(error)
+    private func mapTransport(_ error: Error) -> APIClientError {
+        let ns = error as NSError
+        if ns.domain == NSURLErrorDomain {
+            switch ns.code {
+            case NSURLErrorNotConnectedToInternet:
+                return .unreachable("No network connection.")
+            case NSURLErrorTimedOut:
+                return .unreachable("Request timed out — start `npm run dev:api` on your Mac.")
+            case NSURLErrorCannotConnectToHost, NSURLErrorCannotFindHost:
+                return .unreachable("Connection refused — set Mac LAN IP in Settings (device) and bind API to 0.0.0.0.")
+            default:
+                return .unreachable(ns.localizedDescription)
+            }
         }
+        return .unreachable(error.localizedDescription)
     }
 
     private static func throwIfNeeded(_ response: URLResponse, data: Data) throws {

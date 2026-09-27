@@ -183,10 +183,8 @@ struct SceneOperationDTO: Codable, Equatable, Sendable {
 
     static func add(from item: CatalogItemDTO, objectId: String, position: Vector3) -> SceneOperationDTO {
         let dims = item.dimensions
-        let typeHint = item.category
-            ?? item.tags?.first
-            ?? item.productId.components(separatedBy: "_").first
-            ?? "furniture"
+        // Prefer mesh-recognizable type (sofa/lamp/…) over coarse category ("seating").
+        let typeHint = Self.objectTypeHint(for: item)
         return SceneOperationDTO(
             type: .addObject,
             objectId: objectId,
@@ -200,6 +198,36 @@ struct SceneOperationDTO: Codable, Equatable, Sendable {
             source: "catalog",
             modelUrl: item.modelUrl
         )
+    }
+
+    /// Maps catalog SKU → scene object type used by mesh builders / planners.
+    static func objectTypeHint(for item: CatalogItemDTO) -> String {
+        let pid = item.productId.lowercased()
+        let name = item.name.lowercased()
+        if pid.contains("sofa") || name.contains("sofa") { return "sofa" }
+        if pid.contains("bean") || name.contains("bean") { return "beanbag" }
+        if pid.contains("stool") || name.contains("stool") { return "stool" }
+        if pid.contains("chair") || name.contains("chair") {
+            return name.contains("dining") || pid.contains("dining") ? "dining_chair" : "chair"
+        }
+        if pid.contains("desk") || name.contains("desk") { return "desk" }
+        if pid.contains("table") || name.contains("table") {
+            if name.contains("dining") || pid.contains("dining") { return "dining_table" }
+            if name.contains("coffee") { return "coffee_table" }
+            return "table"
+        }
+        if pid.contains("party_lights") || name.contains("string") { return "string_lights" }
+        if pid.contains("pendant") || name.contains("pendant") { return "pendant" }
+        if pid.contains("lamp") || name.contains("lamp") {
+            return name.contains("desk") || name.contains("task") ? "desk_lamp" : "floor_lamp"
+        }
+        if pid.contains("plant") || name.contains("plant") { return "plant" }
+        if pid.contains("rug") || name.contains("rug") { return "rug" }
+        if pid.contains("backdrop") || name.contains("backdrop") { return "backdrop" }
+        if pid.contains("projector") || name.contains("screen") { return "projector_screen" }
+        if pid.contains("virtual_marker") { return "marker" }
+        if pid.contains("glow") { return "glow_orb" }
+        return item.category ?? item.tags?.first ?? "furniture"
     }
 }
 

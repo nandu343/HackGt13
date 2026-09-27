@@ -1,21 +1,32 @@
 import SwiftUI
 
-/// Searchable catalog picker — GET /catalog → ADD_OBJECT in Live AR.
+/// Searchable catalog picker — GET /catalog → ADD_OBJECT with product model + 1:1 dimensions.
 struct CatalogPickerSheet: View {
     @Environment(SceneSyncStore.self) private var store
     @Environment(\.dismiss) private var dismiss
 
     @State private var query = ""
     @State private var isLoading = false
+    @State private var categoryFilter: String = "All"
+
+    private var categories: [String] {
+        let cats = Set(store.catalog.compactMap(\.category).filter { !$0.isEmpty })
+        return ["All"] + cats.sorted()
+    }
 
     private var filtered: [CatalogItemDTO] {
+        var items = store.catalog
+        if categoryFilter != "All" {
+            items = items.filter { $0.category == categoryFilter }
+        }
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !q.isEmpty else { return store.catalog }
-        return store.catalog.filter { item in
+        guard !q.isEmpty else { return items }
+        return items.filter { item in
             item.name.lowercased().contains(q)
                 || (item.category?.lowercased().contains(q) ?? false)
                 || item.productId.lowercased().contains(q)
                 || (item.tags?.joined(separator: " ").lowercased().contains(q) ?? false)
+                || (item.descriptionText?.lowercased().contains(q) ?? false)
         }
     }
 
@@ -26,52 +37,49 @@ struct CatalogPickerSheet: View {
                     ProgressView("Loading catalog…")
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else if store.catalog.isEmpty {
-                    ContentUnavailableView(
-                        "Catalog unavailable",
-                        systemImage: "shippingbox",
-                        description: Text("Check API connection in Settings, then try again.")
-                    )
-                } else {
-                    List(filtered) { item in
-                        Button {
+                    ContentUnavailableView {
+                        Label("Catalog unavailable", systemImage: "shippingbox")
+                    } description: {
+                        Text(store.lastError ?? "Check API connection in Settings, then reload.")
+                    } actions: {
+                        Button("Reload") {
                             Task {
-                                await store.placeCatalogItem(item)
-                                dismiss()
+                                isLoading = true
+                                await store.loadCatalogIfNeeded(force: true)
+                                isLoading = false
                             }
-                        } label: {
-                            HStack(spacing: 14) {
-                                Image(systemName: iconName(for: item))
-                                    .font(.title3)
-                                    .foregroundStyle(.cyan)
-                                    .frame(width: 36)
-                                VStack(alignment: .leading, spacing: 3) {
-                                    Text(item.name)
-                                        .font(.body.weight(.medium))
-                                        .foregroundStyle(.primary)
-                                    HStack(spacing: 6) {
-                                        Text(String(format: "$%.0f", item.price))
-                                        if let cat = item.category, !cat.isEmpty {
-                                            Text("·")
-                                            Text(cat.capitalized)
-                                        }
-                                        if let rating = item.rating {
-                                            Text("·")
-                                            Text(String(format: "★%.1f", rating))
-                                        }
-                                    }
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                                Image(systemName: "plus.circle.fill")
-                                    .foregroundStyle(.secondary)
-                            }
-                            .padding(.vertical, 4)
                         }
-                        .disabled(store.isBusy)
+                        .buttonStyle(.borderedProminent)
+                    }
+                } else {
+                    List {
+                        if categories.count > 2 {
+                            Section {
+                                Picker("Category", selection: $categoryFilter) {
+                                    ForEach(categories, id: \.self) { Text($0).tag($0) }
+                                }
+                                .pickerStyle(.menu)
+                            }
+                        }
+                        Section {
+                            Text("\(filtered.count) of \(store.catalog.count) items · 1:1 m scale in AR")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        ForEach(filtered) { item in
+                            Button {
+                                Task {
+                                    await store.placeCatalogItem(item)
+                                    dismiss()
+                                }
+                            } label: {
+                                catalogRow(item)
+                            }
+                            .disabled(store.isBusy)
+                        }
                     }
                     .listStyle(.insetGrouped)
-                    .searchable(text: $query, prompt: "Search furniture")
+                    .searchable(text: $query, prompt: "Search all furniture")
                 }
             }
             .background(Color(red: 0.06, green: 0.07, blue: 0.09))
@@ -101,16 +109,71 @@ struct CatalogPickerSheet: View {
         }
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
+        .preferredColorScheme(.dark)
+    }
+
+    private func catalogRow(_ item: CatalogItemDTO) -> some View {
+        HStack(spacing: 14) {
+            Image(systemName: iconName(for: item))
+                .font(.title3)
+                .foregroundStyle(.cyan)
+                .frame(width: 36)
+            VStack(alignment: .leading, spacing: 3) {
+                HStack {
+                    Text(item.name)
+                        .font(.body.weight(.medium))
+                        .foregroundStyle(.primary)
+                    if item.virtualOnly == true {
+                        Text("VIRTUAL")
+                            .font(.caption2.weight(.bold))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(.purple.opacity(0.35), in: Capsule())
+                    }
+                }
+                if let desc = item.descriptionText, !desc.isEmpty {
+                    Text(desc)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(2)
+                }
+                HStack(spacing: 6) {
+                    Text(item.virtualOnly == true ? "Free" : String(format: "$%.0f", item.price))
+                    if let cat = item.category, !cat.isEmpty {
+                        Text("·")
+                        Text(cat.capitalized)
+                    }
+                    if let dims = item.dimensions {
+                        Text("·")
+                        Text(String(format: "%.2f×%.2f×%.2fm", dims.width, dims.height, dims.depth))
+                    }
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Image(systemName: "plus.circle.fill")
+                .foregroundStyle(.secondary)
+        }
+        .padding(.vertical, 4)
     }
 
     private func iconName(for item: CatalogItemDTO) -> String {
-        let t = (item.category ?? item.productId).lowercased()
+        let pid = item.productId.lowercased()
+        let t = (item.category ?? "").lowercased() + " " + item.name.lowercased() + " " + pid
         if t.contains("sofa") || t.contains("couch") { return "sofa.fill" }
-        if t.contains("chair") || t.contains("stool") { return "chair.fill" }
-        if t.contains("table") || t.contains("desk") { return "table.furniture.fill" }
-        if t.contains("lamp") || t.contains("light") { return "lightbulb.fill" }
+        if t.contains("bean") { return "oval.fill" }
+        if t.contains("stool") { return "chair.fill" }
+        if t.contains("chair") { return "chair.fill" }
+        if t.contains("desk") { return "table.furniture.fill" }
+        if t.contains("table") { return "table.furniture.fill" }
+        if t.contains("pendant") || t.contains("string") || t.contains("light") { return "lightbulb.fill" }
+        if t.contains("lamp") { return "lamp.floor.fill" }
         if t.contains("plant") { return "leaf.fill" }
         if t.contains("rug") { return "rectangle.fill" }
+        if t.contains("screen") || t.contains("projector") { return "tv.fill" }
+        if t.contains("backdrop") { return "photo.fill" }
+        if t.contains("virtual") || t.contains("glow") || t.contains("marker") { return "sparkles" }
         return "cube.fill"
     }
 }

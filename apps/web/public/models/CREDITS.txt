@@ -6,5 +6,6 @@
 - Local multi-mesh GLBs (sofa, stool, beanbag, pendant, backdrop, projector_screen,
   string_lights) generated for catalog types not in the Kenney subset.
 
-Web loads GLB via drei useGLTF. iOS Live AR / map twin use RealityKit multi-mesh
-furniture composites (optional USDZ when shipped under Apps/ios/.../Models/).
+Web loads GLB via drei useGLTF, scaled to catalog dimensions (meters).
+iOS Live AR / map twin: per-SKU RealityKit composites (`FurnitureMeshBuilder`) at the
+same dimensions; optional USDZ under `apps/ios/SharedSpatialAI/Models/` (same stems).

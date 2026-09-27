@@ -34,18 +34,23 @@ struct RootFlowView: View {
                     onRoomReady: { openARRoom(showPlan: true) },
                     onOpenSettings: { showSettings = true }
                 )
+                .transition(.opacity.combined(with: .move(edge: .leading)))
             case .arRoom:
                 ARRoomView(
                     onRescan: {
-                        phase = .scan
-                        showPlanSheet = false
+                        withAnimation(.easeInOut(duration: 0.28)) {
+                            phase = .scan
+                            showPlanSheet = false
+                        }
                     },
                     onPlan: { showPlanSheet = true },
                     onInvite: { showInviteSheet = true },
                     onSettings: { showSettings = true }
                 )
+                .transition(.opacity.combined(with: .move(edge: .trailing)))
             }
         }
+        .animation(.easeInOut(duration: 0.28), value: phase)
         .sheet(isPresented: $showPlanSheet) {
             PlanRoomSheet()
         }
@@ -59,9 +64,11 @@ struct RootFlowView: View {
 
     private func openARRoom(showPlan: Bool) {
         store.seedGhostStubsIfNeeded()
-        phase = .arRoom
+        withAnimation(.easeInOut(duration: 0.28)) {
+            phase = .arRoom
+        }
         if showPlan {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
                 showPlanSheet = true
             }
         }
@@ -73,6 +80,7 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var apiURLDraft = APIConfig.baseURL.absoluteString
     @State private var sceneIdDraft = ""
+    @State private var testResult: String?
 
     var body: some View {
         NavigationStack {
@@ -87,9 +95,14 @@ struct SettingsView: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
+                    if let testResult {
+                        Text(testResult)
+                            .font(.caption)
+                            .foregroundStyle(testResult.contains("OK") ? .green : .secondary)
+                    }
                 }
 
-                Section("API") {
+                Section {
                     TextField("Base URL", text: $apiURLDraft)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
@@ -102,12 +115,37 @@ struct SettingsView: View {
                     Button("Save connection") {
                         APIConfig.setBaseURLString(apiURLDraft)
                         store.updateSceneId(sceneIdDraft.isEmpty ? APIConfig.defaultSceneId : sceneIdDraft)
-                        store.statusMessage = "Saved API settings"
+                        apiURLDraft = APIConfig.baseURL.absoluteString
+                        store.statusMessage = "Saved · \(APIConfig.baseURL.absoluteString)"
                         store.connectRealtime()
+                        testResult = nil
                     }
                     .fontWeight(.semibold)
+                    Button {
+                        Task {
+                            APIConfig.setBaseURLString(apiURLDraft)
+                            let ok = await store.testConnection()
+                            testResult = ok
+                                ? "OK · \(APIConfig.baseURL.absoluteString)"
+                                : (store.lastError ?? "Failed")
+                            if ok {
+                                await store.loadCatalogIfNeeded(force: true)
+                            }
+                        }
+                    } label: {
+                        Label(
+                            store.isBusy ? "Testing…" : "Test connection",
+                            systemImage: "antenna.radiowaves.left.and.right"
+                        )
+                    }
+                    .disabled(store.isBusy)
+                } header: {
+                    Text("API")
                 } footer: {
-                    Text("Simulator: http://127.0.0.1:8000 · Device: http://<Mac-LAN-IP>:8000 with API bound to 0.0.0.0")
+                    Text(
+                        "Simulator: http://127.0.0.1:8000 · Device: http://<Mac-LAN-IP>:8000 "
+                            + "(API must bind 0.0.0.0). Saved URL sticks across launches."
+                    )
                 }
 
                 Section("Scene") {
@@ -120,7 +158,9 @@ struct SettingsView: View {
                         Task { await store.loadCatalogIfNeeded(force: true) }
                     } label: {
                         Label(
-                            store.catalog.isEmpty ? "Load catalog" : "Reload catalog (\(store.catalog.count))",
+                            store.catalog.isEmpty
+                                ? "Load catalog"
+                                : "Reload catalog (\(store.catalog.count))",
                             systemImage: "shippingbox"
                         )
                     }
@@ -130,7 +170,10 @@ struct SettingsView: View {
                         LabeledContent("Strokes", value: "\(store.strokes.count)")
                     }
                     if let err = store.lastError {
-                        Text(err).font(.caption).foregroundStyle(.red)
+                        Text(err)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                            .textSelection(.enabled)
                     }
                 }
 

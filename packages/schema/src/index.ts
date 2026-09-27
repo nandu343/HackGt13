@@ -160,6 +160,8 @@ export const ProductSchema = z.object({
   assetId: z.string().nullable().optional(),
   /** Public path to GLB (web) / USDZ (iOS) e.g. /models/sofa.glb */
   modelUrl: z.string().nullable().optional(),
+  /** Short shop blurb shown in catalog / Place picker. */
+  description: z.string().nullable().optional(),
   /** Retailer product page (Amazon / IKEA-style). Open in new tab from Shop. */
   productUrl: z.string().nullable().optional(),
   /** Alias accepted from some feeds — prefer productUrl. */

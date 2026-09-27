@@ -2,45 +2,58 @@ import Foundation
 
 /// Runtime config for the API host and active scene.
 ///
-/// - Simulator → `localhost` / `127.0.0.1` reaches the Mac running uvicorn.
-/// - Physical device → set your Mac's LAN IP in Settings (or env `SHARED_SPATIAL_API_URL`).
+/// Priority: **Settings (UserDefaults)** → env `SHARED_SPATIAL_API_URL` → simulator/device default.
+/// Saving in Settings always sticks across launches.
 enum APIConfig {
     static let defaultSceneId = "scene_party_001"
-    static let actorId = "ios_scaffold"
+    static let actorId = "ios_ar"
 
     private static let baseURLKey = "ssa_api_base_url"
     private static let sceneIdKey = "ssa_scene_id"
 
-    /// Override at build time, via Settings UI, or env `SHARED_SPATIAL_API_URL`.
+    /// Resolved API base. UserDefaults wins so the in-app Settings field sticks.
     static var baseURL: URL {
-        if let raw = ProcessInfo.processInfo.environment["SHARED_SPATIAL_API_URL"],
-           let url = URL(string: raw), !raw.isEmpty {
+        if let saved = UserDefaults.standard.string(forKey: baseURLKey)?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+           !saved.isEmpty,
+           let url = URL(string: saved),
+           url.scheme != nil {
             return url
         }
-        if let saved = UserDefaults.standard.string(forKey: baseURLKey),
-           let url = URL(string: saved), !saved.isEmpty {
+        if let raw = ProcessInfo.processInfo.environment["SHARED_SPATIAL_API_URL"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+           !raw.isEmpty,
+           let url = URL(string: raw) {
             return url
         }
         #if targetEnvironment(simulator)
         return URL(string: "http://127.0.0.1:8000")!
         #else
+        // Device default — override in Settings with your Mac LAN IP.
         return URL(string: "http://127.0.0.1:8000")!
         #endif
     }
 
     static var sceneId: String {
-        let saved = UserDefaults.standard.string(forKey: sceneIdKey)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let saved = UserDefaults.standard.string(forKey: sceneIdKey)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         if let saved, !saved.isEmpty { return saved }
         return defaultSceneId
     }
 
+    /// Persist base URL. Empty string clears the override (falls back to env / default).
     static func setBaseURLString(_ raw: String) {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         if trimmed.isEmpty {
             UserDefaults.standard.removeObject(forKey: baseURLKey)
-        } else {
-            UserDefaults.standard.set(trimmed, forKey: baseURLKey)
+            return
         }
+        var normalized = trimmed
+        if !normalized.contains("://") {
+            normalized = "http://\(normalized)"
+        }
+        UserDefaults.standard.set(normalized, forKey: baseURLKey)
     }
 
     static func setSceneId(_ raw: String) {
@@ -50,6 +63,13 @@ enum APIConfig {
         } else {
             UserDefaults.standard.set(trimmed, forKey: sceneIdKey)
         }
+    }
+
+    /// Whether a UserDefaults override is active (Settings saved).
+    static var hasCustomBaseURL: Bool {
+        guard let saved = UserDefaults.standard.string(forKey: baseURLKey)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) else { return false }
+        return !saved.isEmpty
     }
 
     /// Web twin join URL for the current scene (+ optional invite token).

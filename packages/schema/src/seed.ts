@@ -67,17 +67,22 @@ export const demoScene = {
   currency: 'USD'
 };
 
-/** ~18 curated items — purchasable vs virtualOnly for commerce sandbox. */
+/**
+ * ~18 curated items — each `modelUrl` maps 1:1 to a distinct GLB (web) /
+ * USDZ or RealityKit composite (iOS) scaled to `dimensions` meters.
+ */
 const demoCatalogBase = [
   {
     productId: 'product_sofa_01',
-    name: 'Lounge Sofa',
+    name: 'Nordic Lounge Sofa 2.1m',
+    description:
+      'Deep three-cushion lounge sofa with rolled arms — AR mesh matches 2.1×0.82×0.91 m.',
     price: 899,
     currency: 'USD',
     dimensions: { width: 2.1, height: 0.82, depth: 0.91 },
     assetId: 'asset_sofa_01',
     modelUrl: '/models/sofa.glb',
-    tags: ['seating', 'living'],
+    tags: ['seating', 'living', 'sofa', 'premium'],
     purchasable: true,
     virtualOnly: false,
     rating: 4.6,
@@ -86,13 +91,14 @@ const demoCatalogBase = [
   },
   {
     productId: 'chair_fold_01',
-    name: 'Folding Chair',
+    name: 'Portable Folding Lounge Chair',
+    description: 'Slim X-frame folding chair for overflow seating — budget party pick.',
     price: 35,
     currency: 'USD',
     dimensions: { width: 0.48, height: 0.86, depth: 0.52 },
     assetId: 'asset_chair_fold_01',
     modelUrl: '/models/loungeChair.glb',
-    tags: ['seating', 'party'],
+    tags: ['seating', 'party', 'folding'],
     purchasable: true,
     virtualOnly: false,
     rating: 3.2,
@@ -101,7 +107,8 @@ const demoCatalogBase = [
   },
   {
     productId: 'chair_dining_02',
-    name: 'Dining Chair',
+    name: 'Oak Slat Dining Chair',
+    description: 'Upright dining chair with vertical back slats — pairs with dining table.',
     price: 79,
     currency: 'USD',
     dimensions: { width: 0.46, height: 0.92, depth: 0.5 },
@@ -116,13 +123,14 @@ const demoCatalogBase = [
   },
   {
     productId: 'stool_bar_01',
-    name: 'Bar Stool',
+    name: 'Chrome Pedestal Bar Stool',
+    description: 'Round seat on a chrome pedestal with foot ring — 1.05 m tall.',
     price: 65,
     currency: 'USD',
     dimensions: { width: 0.4, height: 1.05, depth: 0.4 },
     assetId: 'asset_stool_bar_01',
     modelUrl: '/models/stool.glb',
-    tags: ['seating', 'party'],
+    tags: ['seating', 'party', 'bar'],
     purchasable: true,
     virtualOnly: false,
     rating: 4.4,
@@ -131,7 +139,8 @@ const demoCatalogBase = [
   },
   {
     productId: 'beanbag_01',
-    name: 'Bean Bag',
+    name: 'Cloud Bean Bag',
+    description: 'Squashy floor lounger for movie / party overflow seating.',
     price: 55,
     currency: 'USD',
     dimensions: { width: 0.9, height: 0.7, depth: 0.9 },
@@ -146,13 +155,14 @@ const demoCatalogBase = [
   },
   {
     productId: 'product_table_05',
-    name: 'Coffee Table',
+    name: 'Walnut Coffee Table',
+    description: 'Low living-room coffee table with thick top — 1.4×0.75×1.1 m.',
     price: 249,
     currency: 'USD',
     dimensions: { width: 1.4, height: 0.75, depth: 1.1 },
     assetId: 'asset_table_05',
     modelUrl: '/models/table.glb',
-    tags: ['table', 'living'],
+    tags: ['table', 'living', 'coffee'],
     purchasable: true,
     virtualOnly: false,
     rating: 4.2,
@@ -161,7 +171,8 @@ const demoCatalogBase = [
   },
   {
     productId: 'desk_study_01',
-    name: 'Study Desk',
+    name: 'Linnmon Study Desk',
+    description: 'Compact work desk with drawer rail — ideal for study scenarios.',
     price: 189,
     currency: 'USD',
     dimensions: { width: 1.2, height: 0.75, depth: 0.6 },
@@ -176,7 +187,8 @@ const demoCatalogBase = [
   },
   {
     productId: 'table_dining_01',
-    name: 'Dining Table',
+    name: 'Extendable Dining Table 1.8m',
+    description: 'Long rectangular dining surface for dinner gatherings.',
     price: 420,
     currency: 'USD',
     dimensions: { width: 1.8, height: 0.75, depth: 0.9 },
@@ -192,12 +204,13 @@ const demoCatalogBase = [
   {
     productId: 'product_39',
     name: 'Arc Floor Lamp',
+    description: 'Tall arched floor lamp with round shade — 1.72 m height.',
     price: 129,
     currency: 'USD',
     dimensions: { width: 0.4, height: 1.72, depth: 0.4 },
     assetId: 'asset_lamp_12',
     modelUrl: '/models/lampRoundFloor.glb',
-    tags: ['lighting'],
+    tags: ['lighting', 'floor'],
     purchasable: true,
     virtualOnly: false,
     rating: 4.0,
@@ -206,7 +219,8 @@ const demoCatalogBase = [
   },
   {
     productId: 'party_lights_03',
-    name: 'String Party Lights',
+    name: 'Festoon String Party Lights',
+    description: '3 m string of warm bulbs for party ceilings and photo walls.',
     price: 28,
     currency: 'USD',
     dimensions: { width: 3.0, height: 0.05, depth: 0.05 },
@@ -221,7 +235,8 @@ const demoCatalogBase = [
   },
   {
     productId: 'lamp_desk_01',
-    name: 'Task Desk Lamp',
+    name: 'Square Task Desk Lamp',
+    description: 'Compact articulated desk lamp for study / coworking tables.',
     price: 42,
     currency: 'USD',
     dimensions: { width: 0.2, height: 0.45, depth: 0.2 },
@@ -236,7 +251,8 @@ const demoCatalogBase = [
   },
   {
     productId: 'pendant_dinner_01',
-    name: 'Pendant Light',
+    name: 'Dome Pendant Light',
+    description: 'Hanging dome shade for dining areas — ceiling-mounted look in AR.',
     price: 95,
     currency: 'USD',
     dimensions: { width: 0.45, height: 0.35, depth: 0.45 },
@@ -251,7 +267,8 @@ const demoCatalogBase = [
   },
   {
     productId: 'backdrop_12',
-    name: 'Photo Backdrop',
+    name: 'Collapsible Photo Backdrop',
+    description: '2×2.4 m freestanding photo / stream backdrop panel.',
     price: 45,
     currency: 'USD',
     dimensions: { width: 2.0, height: 2.4, depth: 0.08 },
@@ -266,13 +283,14 @@ const demoCatalogBase = [
   },
   {
     productId: 'plant_tall_02',
-    name: 'Tall Floor Plant',
+    name: 'Fiddle Leaf Floor Plant',
+    description: 'Tall potted plant — softens corners in party and living layouts.',
     price: 62,
     currency: 'USD',
     dimensions: { width: 0.45, height: 1.4, depth: 0.45 },
     assetId: 'asset_plant_tall_02',
     modelUrl: '/models/pottedPlant.glb',
-    tags: ['decor'],
+    tags: ['decor', 'plant'],
     purchasable: true,
     virtualOnly: false,
     rating: 4.0,
@@ -281,7 +299,8 @@ const demoCatalogBase = [
   },
   {
     productId: 'rug_party_01',
-    name: 'Dance Floor Rug',
+    name: '2×2 m Dance Floor Rug',
+    description: 'Square party rug marking the dance / clear-center zone.',
     price: 89,
     currency: 'USD',
     dimensions: { width: 2.0, height: 0.02, depth: 2.0 },
@@ -296,7 +315,8 @@ const demoCatalogBase = [
   },
   {
     productId: 'projector_screen_01',
-    name: 'Projector Screen',
+    name: 'Pull-Down Projector Screen',
+    description: '2.4×1.5 m movie screen with top bar — faces seating in movie mode.',
     price: 149,
     currency: 'USD',
     dimensions: { width: 2.4, height: 1.5, depth: 0.06 },
@@ -312,6 +332,7 @@ const demoCatalogBase = [
   {
     productId: 'virtual_marker_01',
     name: 'Layout Marker',
+    description: 'Virtual helper disc — not for checkout; marks intended zones.',
     price: 0,
     currency: 'USD',
     dimensions: { width: 0.2, height: 0.05, depth: 0.2 },
@@ -326,6 +347,7 @@ const demoCatalogBase = [
   {
     productId: 'virtual_glow_orb',
     name: 'Ambient Glow Orb',
+    description: 'Virtual mood light for planning — not purchasable.',
     price: 0,
     currency: 'USD',
     dimensions: { width: 0.3, height: 0.3, depth: 0.3 },
@@ -361,4 +383,3 @@ export const demoCatalog = demoCatalogBase.map((item) => {
     ? { ...item, productUrl, websiteUrl: productUrl }
     : item;
 });
-
