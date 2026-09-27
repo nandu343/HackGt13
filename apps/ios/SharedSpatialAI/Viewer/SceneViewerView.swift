@@ -1,6 +1,7 @@
 import RealityKit
 import SwiftUI
 import UIKit
+import simd
 
 /// Non-AR RealityKit map (Simulator / secondary map view). Same Y-up meters scene graph.
 struct SceneRealityView: UIViewRepresentable {
@@ -515,7 +516,7 @@ struct ARRoomView: View {
                     Text(title)
                         .font(.subheadline.weight(.semibold))
                     if let dims = obj.dimensions {
-                        Text(String(format: "%.2f × %.2f × %.2f m", dims.width, dims.height, dims.depth))
+                        Text(dims.displayMetersSpaced)
                             .font(.caption2.monospacedDigit())
                             .foregroundStyle(.tertiary)
                     }

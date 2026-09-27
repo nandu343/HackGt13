@@ -2,6 +2,7 @@ import ARKit
 import RealityKit
 import SwiftUI
 import UIKit
+import simd
 
 #if !targetEnvironment(simulator)
 /// Live camera ARView: world-tracking passthrough with shared scene overlays.

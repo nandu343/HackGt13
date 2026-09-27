@@ -1,20 +1,23 @@
 import RealityKit
 import UIKit
+import simd
 
 /// Product-accurate furniture for Live AR + map twin.
 /// Prefers bundled / remote USDZ (same stem as web GLB); otherwise builds a
 /// distinct RealityKit composite per catalog SKU at catalog dimensions (meters).
 enum FurnitureMeshBuilder {
     static func makeEntity(for object: SceneObjectDTO, selected: Bool) -> Entity {
-        let w = Float(object.dimensions?.width ?? 0.5)
-        let h = Float(object.dimensions?.height ?? 0.5)
-        let d = Float(object.dimensions?.depth ?? 0.5)
+        let w = Float(object.dimensions?.widthMeters ?? 0.5)
+        let h = Float(object.dimensions?.heightMeters ?? 0.5)
+        let d = Float(object.dimensions?.depthMeters ?? 0.5)
         let meshKey = ProductModelCatalog.meshKey(for: object)
+        let scaleSIMD = Coordinates.toSIMD(object.transform.scale ?? Vector3(1, 1, 1))
 
         // 1) Prefer real USDZ (bundle Models/ or remote .usdz) scaled 1:1 to dimensions.
         if let usdz = tryLoadProductUSDZ(for: object, width: w, height: h, depth: d) {
             usdz.position = Coordinates.toSIMD(object.transform.position)
             usdz.orientation = Coordinates.toSIMDQuat(object.transform.rotation)
+            usdz.scale = scaleSIMD
             if selected { addSelectionRing(to: usdz, width: w, height: h, depth: d, name: object.id) }
             enableCollisions(on: usdz)
             return usdz
@@ -25,6 +28,7 @@ enum FurnitureMeshBuilder {
         parent.name = object.id
         parent.position = Coordinates.toSIMD(object.transform.position)
         parent.orientation = Coordinates.toSIMDQuat(object.transform.rotation)
+        parent.scale = scaleSIMD
 
         let baseColor = furnitureColor(for: object, key: meshKey)
         let color = selected

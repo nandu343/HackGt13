@@ -2,6 +2,7 @@ import ARKit
 import RealityKit
 import SwiftUI
 import UIKit
+import simd
 
 #if !targetEnvironment(simulator)
 /// Camera-based room scan: ARKit world tracking + plane detection (works without LiDAR).
@@ -326,7 +327,7 @@ private struct CameraScanPlaneUpdate: Sendable {
                     transform.columns.3.y,
                     transform.columns.3.z
                 ),
-                extent: SIMD3(plane.planeExtent.width, 0, plane.planeExtent.height),
+                extent: SIMD3(plane.planeExtent.width, Float(0), plane.planeExtent.height),
                 transform: transform,
                 alignment: alignment
             )

@@ -77,6 +77,7 @@ final class RoomCaptureViewController: UIViewController, RoomCaptureViewDelegate
             action: #selector(doneTapped)
         )
         let flex = UIBarButtonItem(barButtonSystemItem: .flexibleSpace, target: nil, action: nil)
+        // cancel | flexibleSpace | done — keep system flexibleSpace (not a custom spacer view).
         bar.items = [cancel, flex, done]
         view.addSubview(bar)
         NSLayoutConstraint.activate([

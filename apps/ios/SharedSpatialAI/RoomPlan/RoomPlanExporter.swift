@@ -64,7 +64,9 @@ enum RoomPlanExporter {
                     dimensions: dims,
                     productId: nil,
                     assetId: nil,
-                    lockedBy: nil
+                    modelUrl: nil,
+                    lockedBy: nil,
+                    lockedUntil: nil
                 )
             )
         }
@@ -90,7 +92,9 @@ enum RoomPlanExporter {
                     dimensions: dims,
                     productId: nil,
                     assetId: nil,
-                    lockedBy: nil
+                    modelUrl: nil,
+                    lockedBy: nil,
+                    lockedUntil: nil
                 )
             )
         }
@@ -183,7 +187,9 @@ enum DemoSceneFactory {
                     dimensions: DimensionsDTO(width: 2.1, height: 0.82, depth: 0.91),
                     productId: "product_sofa_01",
                     assetId: nil,
-                    lockedBy: nil
+                    modelUrl: nil,
+                    lockedBy: nil,
+                    lockedUntil: nil
                 ),
                 SceneObjectDTO(
                     id: "lamp_17",
@@ -194,7 +200,9 @@ enum DemoSceneFactory {
                     dimensions: DimensionsDTO(width: 0.4, height: 1.72, depth: 0.4),
                     productId: "product_39",
                     assetId: "asset_lamp_12",
-                    lockedBy: nil
+                    modelUrl: nil,
+                    lockedBy: nil,
+                    lockedUntil: nil
                 ),
                 SceneObjectDTO(
                     id: "table_05",
@@ -205,7 +213,9 @@ enum DemoSceneFactory {
                     dimensions: DimensionsDTO(width: 1.4, height: 0.75, depth: 1.1),
                     productId: "product_table_05",
                     assetId: nil,
-                    lockedBy: nil
+                    modelUrl: nil,
+                    lockedBy: nil,
+                    lockedUntil: nil
                 )
             ],
             budgetUsed: 1277,

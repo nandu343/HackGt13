@@ -30,8 +30,10 @@ struct InviteSheet: View {
                         } label: {
                             Label(copied ? "Copied" : "Copy link", systemImage: copied ? "checkmark" : "doc.on.doc")
                         }
-                        ShareLink(item: link) {
-                            Label("Share…", systemImage: "square.and.arrow.up")
+                        if let url = URL(string: link) {
+                            ShareLink(item: url) {
+                                Label("Share…", systemImage: "square.and.arrow.up")
+                            }
                         }
                     } else if store.isBusy {
                         ProgressView("Creating invite…")

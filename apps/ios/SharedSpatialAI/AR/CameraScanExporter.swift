@@ -111,7 +111,9 @@ enum CameraScanExporter {
             .filter { $0.alignment == .vertical }
             .map { Double($0.extent.z) }
             .max()
-        let height = max(2.2, wallH ?? Double(maxY - Float(floorY)), Double(maxY - minY))
+        let spanY = Double(maxY - minY)
+        let fromFloor = Double(maxY) - floorY
+        let height = max(2.2, max(wallH ?? fromFloor, spanY))
 
         return (origin, RoomBoundsDTO(width: width, length: length, height: height))
     }
@@ -148,7 +150,9 @@ enum CameraScanExporter {
                     ),
                     productId: nil,
                     assetId: nil,
-                    lockedBy: nil
+                    modelUrl: nil,
+                    lockedBy: nil,
+                    lockedUntil: nil
                 )
             }
     }
@@ -188,7 +192,9 @@ enum CameraScanExporter {
                     ),
                     productId: nil,
                     assetId: nil,
-                    lockedBy: nil
+                    modelUrl: nil,
+                    lockedBy: nil,
+                    lockedUntil: nil
                 )
             }
     }

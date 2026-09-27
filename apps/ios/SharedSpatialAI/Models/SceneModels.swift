@@ -84,7 +84,7 @@ struct Quaternion: Codable, Equatable, Sendable {
 struct TransformDTO: Codable, Equatable, Sendable {
     var position: Vector3
     var rotation: Quaternion
-    var scale: Vector3?
+    var scale: Vector3? = nil
 
     static func at(_ position: Vector3, rotation: Quaternion = .identity) -> TransformDTO {
         TransformDTO(position: position, rotation: rotation, scale: Vector3(1, 1, 1))
@@ -92,23 +92,37 @@ struct TransformDTO: Codable, Equatable, Sendable {
 }
 
 struct DimensionsDTO: Codable, Equatable, Sendable {
-    var width: Double?
-    var height: Double?
-    var depth: Double?
+    var width: Double? = nil
+    var height: Double? = nil
+    var depth: Double? = nil
+
+    /// Catalog / mesh defaults when a dimension is missing from the API.
+    var widthMeters: Double { width ?? 0.5 }
+    var heightMeters: Double { height ?? 0.5 }
+    var depthMeters: Double { depth ?? 0.5 }
+
+    /// Safe for `String(format:)` — never passes `Double?`.
+    var displayMetersCompact: String {
+        String(format: "%.2f×%.2f×%.2fm", widthMeters, heightMeters, depthMeters)
+    }
+
+    var displayMetersSpaced: String {
+        String(format: "%.2f × %.2f × %.2f m", widthMeters, heightMeters, depthMeters)
+    }
 }
 
 struct SceneObjectDTO: Codable, Identifiable, Equatable, Sendable {
     var id: String
     var type: String
-    var source: String?
-    var movable: Bool?
+    var source: String? = nil
+    var movable: Bool? = nil
     var transform: TransformDTO
-    var dimensions: DimensionsDTO?
-    var productId: String?
-    var assetId: String?
-    var modelUrl: String?
-    var lockedBy: String?
-    var lockedUntil: String?
+    var dimensions: DimensionsDTO? = nil
+    var productId: String? = nil
+    var assetId: String? = nil
+    var modelUrl: String? = nil
+    var lockedBy: String? = nil
+    var lockedUntil: String? = nil
 }
 
 struct RoomBoundsDTO: Codable, Equatable, Sendable {
@@ -119,12 +133,12 @@ struct RoomBoundsDTO: Codable, Equatable, Sendable {
 
 struct SceneDTO: Codable, Equatable, Sendable {
     var sceneId: String
-    var roomId: String?
+    var roomId: String? = nil
     var version: Int
     var bounds: RoomBoundsDTO
     var objects: [SceneObjectDTO]
-    var budgetUsed: Double?
-    var currency: String?
+    var budgetUsed: Double? = nil
+    var currency: String? = nil
 }
 
 enum OpType: String, Codable, Sendable {
@@ -137,47 +151,30 @@ enum OpType: String, Codable, Sendable {
 
 struct SceneOperationDTO: Codable, Equatable, Sendable {
     var type: OpType
-    var objectId: String?
-    var targetPosition: Vector3?
-    var targetRotation: Quaternion?
-    var assetId: String?
-    var productId: String?
-    var objectType: String?
-    var dimensions: DimensionsDTO?
-    var movable: Bool?
-    var source: String?
+    var objectId: String? = nil
+    var targetPosition: Vector3? = nil
+    var targetRotation: Quaternion? = nil
+    var assetId: String? = nil
+    var productId: String? = nil
+    var objectType: String? = nil
+    var dimensions: DimensionsDTO? = nil
+    var movable: Bool? = nil
+    var source: String? = nil
     /// Optional GLB/USDZ path copied from catalog onto ADD_OBJECT.
-    var modelUrl: String?
+    var modelUrl: String? = nil
 
     static func move(objectId: String, to position: Vector3) -> SceneOperationDTO {
         SceneOperationDTO(
             type: .moveObject,
             objectId: objectId,
-            targetPosition: position,
-            targetRotation: nil,
-            assetId: nil,
-            productId: nil,
-            objectType: nil,
-            dimensions: nil,
-            movable: nil,
-            source: nil,
-            modelUrl: nil
+            targetPosition: position
         )
     }
 
     static func delete(objectId: String) -> SceneOperationDTO {
         SceneOperationDTO(
             type: .deleteObject,
-            objectId: objectId,
-            targetPosition: nil,
-            targetRotation: nil,
-            assetId: nil,
-            productId: nil,
-            objectType: nil,
-            dimensions: nil,
-            movable: nil,
-            source: nil,
-            modelUrl: nil
+            objectId: objectId
         )
     }
 
@@ -233,8 +230,8 @@ struct SceneOperationDTO: Codable, Equatable, Sendable {
 
 struct OperationEnvelopeDTO: Codable, Sendable {
     var baseVersion: Int
-    var actorId: String?
-    var opId: String?
+    var actorId: String? = nil
+    var opId: String? = nil
     var operations: [SceneOperationDTO]
 }
 
@@ -244,13 +241,13 @@ struct OperationsResultDTO: Codable, Sendable {
     var version: Int
     var applied: Int
     var scene: SceneDTO
-    var warnings: [String]?
+    var warnings: [String]? = nil
 }
 
 struct SceneInviteDTO: Codable, Equatable, Sendable {
     var token: String
     var sceneId: String
-    var createdAt: String?
-    var createdBy: String?
-    var label: String?
+    var createdAt: String? = nil
+    var createdBy: String? = nil
+    var label: String? = nil
 }

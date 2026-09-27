@@ -138,14 +138,18 @@ struct CatalogPickerSheet: View {
                         .lineLimit(2)
                 }
                 HStack(spacing: 6) {
-                    Text(item.virtualOnly == true ? "Free" : String(format: "$%.0f", item.price))
+                    Text(item.priceDisplay)
                     if let cat = item.category, !cat.isEmpty {
                         Text("·")
                         Text(cat.capitalized)
                     }
                     if let dims = item.dimensions {
                         Text("·")
-                        Text(String(format: "%.2f×%.2f×%.2fm", dims.width, dims.height, dims.depth))
+                        Text(dims.displayMetersCompact)
+                    }
+                    if let rating = item.ratingDisplay {
+                        Text("·")
+                        Text(rating)
                     }
                 }
                 .font(.caption)

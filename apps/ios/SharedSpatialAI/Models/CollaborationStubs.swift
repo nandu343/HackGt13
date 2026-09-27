@@ -45,15 +45,15 @@ import Foundation
 struct PresenceUserDTO: Codable, Equatable, Sendable {
     var userId: String
     var displayName: String
-    var color: String?
-    var selectedObjectId: String?
-    var lastSeenAt: String?
-    var voiceEnabled: Bool?
-    var voiceSpeaking: Bool?
+    var color: String? = nil
+    var selectedObjectId: String? = nil
+    var lastSeenAt: String? = nil
+    var voiceEnabled: Bool? = nil
+    var voiceSpeaking: Bool? = nil
     /// Ghost standing point in shared Y-up meters (orbit focus / camera presence).
-    var position: Vector3?
+    var position: Vector3? = nil
     /// Optional look / facing direction.
-    var lookDirection: Vector3?
+    var lookDirection: Vector3? = nil
 }
 
 /// Thin RealityKit hook: build translucent ghost anchors from a presence snapshot.
@@ -92,8 +92,8 @@ struct DrawingStrokeDTO: Codable, Equatable, Identifiable, Sendable {
     var color: String
     var width: Double
     var points: [Vector3]
-    var plane: DrawPlane?
-    var createdAt: String?
+    var plane: DrawPlane? = nil
+    var createdAt: String? = nil
 
     var id: String { strokeId }
 }

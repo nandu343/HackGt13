@@ -10,22 +10,22 @@ struct LayoutRequestDTO: Codable, Sendable {
 }
 
 struct LayoutConstraintsDTO: Codable, Sendable {
-    var budget: Double?
-    var guestCount: Int?
-    var mustHave: [String]?
-    var clearCenter: Bool?
+    var budget: Double? = nil
+    var guestCount: Int? = nil
+    var mustHave: [String]? = nil
+    var clearCenter: Bool? = nil
 }
 
 /// Bang-for-buck product choice from `/ai/layout` (mirrors schema `valuePicks`).
 struct ValuePickDTO: Codable, Equatable, Identifiable, Sendable {
     var productId: String
-    var name: String?
+    var name: String? = nil
     var score: Double
     var reason: String
-    var objectId: String?
-    var replacedProductId: String?
-    var rating: Double?
-    var price: Double?
+    var objectId: String? = nil
+    var replacedProductId: String? = nil
+    var rating: Double? = nil
+    var price: Double? = nil
 
     var id: String { "\(objectId ?? "")-\(productId)" }
 }
@@ -34,11 +34,11 @@ struct LayoutResponseDTO: Codable, Sendable {
     var scenario: String
     var reasoningSummary: String
     var operations: [SceneOperationDTO]
-    var constraints: LayoutConstraintsDTO
-    var warnings: [String]?
-    var plannerMode: String?
-    var fixedOps: Int?
-    var valuePicks: [ValuePickDTO]?
+    var constraints: LayoutConstraintsDTO? = nil
+    var warnings: [String]? = nil
+    var plannerMode: String? = nil
+    var fixedOps: Int? = nil
+    var valuePicks: [ValuePickDTO]? = nil
 }
 
 /// Catalog product — mirrors `packages/schema` CatalogItem / Product.
@@ -46,24 +46,24 @@ struct CatalogItemDTO: Codable, Equatable, Identifiable, Sendable {
     var productId: String
     var name: String
     var price: Double
-    var currency: String?
-    var dimensions: DimensionsDTO?
-    var assetId: String?
-    var modelUrl: String?
+    var currency: String? = nil
+    var dimensions: DimensionsDTO? = nil
+    var assetId: String? = nil
+    var modelUrl: String? = nil
     /// Short shop blurb (optional).
-    var description: String?
+    var description: String? = nil
     /// Retailer product page — “Open website” in Plan / Shop.
-    var productUrl: String?
+    var productUrl: String? = nil
     /// Alias some feeds use; prefer `productUrl`.
-    var websiteUrl: String?
-    var tags: [String]?
-    var purchasable: Bool?
-    var virtualOnly: Bool?
-    var rating: Double?
+    var websiteUrl: String? = nil
+    var tags: [String]? = nil
+    var purchasable: Bool? = nil
+    var virtualOnly: Bool? = nil
+    var rating: Double? = nil
     /// Mirrors schema qualityTier (budget / standard / premium).
-    var qualityTier: String?
-    var category: String?
-    var thumbnailUrl: String?
+    var qualityTier: String? = nil
+    var category: String? = nil
+    var thumbnailUrl: String? = nil
 
     var id: String { productId }
 
@@ -83,5 +83,15 @@ struct CatalogItemDTO: Codable, Equatable, Identifiable, Sendable {
         let raw = productUrl ?? websiteUrl
         guard let raw, !raw.isEmpty, let url = URL(string: raw) else { return nil }
         return url
+    }
+
+    /// Price for UI — never formats an optional.
+    var priceDisplay: String {
+        virtualOnly == true ? "Free" : String(format: "$%.0f", price)
+    }
+
+    var ratingDisplay: String? {
+        guard let rating else { return nil }
+        return String(format: "★ %.1f", rating)
     }
 }

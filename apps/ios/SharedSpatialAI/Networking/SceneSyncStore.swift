@@ -259,7 +259,7 @@ final class SceneSyncStore {
             return
         }
         let id = "ar_\(item.productId)_\(UUID().uuidString.prefix(5))"
-        let height = item.dimensions?.height ?? 0.5
+        let height = item.dimensions?.heightMeters ?? 0.5
         let y = height * 0.5
         let resolved: Vector3
         if let position {

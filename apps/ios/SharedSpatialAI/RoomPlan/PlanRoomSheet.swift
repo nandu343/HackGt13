@@ -180,6 +180,10 @@ struct PlanRoomSheet: View {
                             Text(String(format: "★ %.1f · score %.0f", rating, pick.score))
                                 .font(.caption2)
                                 .foregroundStyle(.tertiary)
+                        } else {
+                            Text(String(format: "score %.0f", pick.score))
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
                         }
                         if let url = store.catalogItem(productId: pick.productId)?.openWebsiteURL {
                             Button {
