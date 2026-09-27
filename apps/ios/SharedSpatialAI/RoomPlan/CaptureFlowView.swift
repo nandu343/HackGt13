@@ -89,7 +89,7 @@ struct CaptureFlowView: View {
                             } label: {
                                 labelRow(
                                     title: "Scan with camera",
-                                    subtitle: "ARKit planes · works without LiDAR",
+                                    subtitle: "Walk around — auto floor/walls · no corner tapping",
                                     systemImage: "camera.viewfinder"
                                 )
                             }

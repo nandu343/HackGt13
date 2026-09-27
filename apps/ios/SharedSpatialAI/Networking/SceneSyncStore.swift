@@ -185,19 +185,58 @@ final class SceneSyncStore {
         }
     }
 
-    func pushOps(_ operations: [SceneOperationDTO]) async {
+    /// Project ADD/MOVE ops onto the floor (Y = height/2) before sending to the API.
+    private func floorProjectOperations(_ operations: [SceneOperationDTO]) -> [SceneOperationDTO] {
+        operations.map { op in
+            var next = op
+            switch op.type {
+            case .addObject:
+                let h = op.dimensions?.heightMeters
+                    ?? catalogItem(productId: op.productId ?? "")?.dimensions?.heightMeters
+                    ?? 0.5
+                let sits: Bool = {
+                    if let t = op.objectType?.lowercased() {
+                        if t.contains("pendant") || t.contains("string_light") || t == "wall" {
+                            return false
+                        }
+                    }
+                    return true
+                }()
+                if let pos = op.targetPosition {
+                    next.targetPosition = Coordinates.projectOntoFloor(pos, heightMeters: h, sitsOnFloor: sits)
+                }
+            case .moveObject:
+                if let id = op.objectId,
+                   let existing = scene?.objects.first(where: { $0.id == id }),
+                   let pos = op.targetPosition {
+                    let h = existing.dimensions?.heightMeters ?? 0.5
+                    next.targetPosition = Coordinates.projectOntoFloor(
+                        pos,
+                        heightMeters: h,
+                        sitsOnFloor: Coordinates.sitsOnFloor(existing)
+                    )
+                }
+            default:
+                break
+            }
+            return next
+        }
+    }
+
+    func pushOps(_ operations: [SceneOperationDTO], busy: Bool = true) async {
         guard let current = scene else {
             lastError = "No scene loaded — scan or refresh first"
             return
         }
-        isBusy = true
+        let projected = floorProjectOperations(operations)
+        if busy { isBusy = true }
         lastError = nil
-        defer { isBusy = false }
+        defer { if busy { isBusy = false } }
         do {
             let result = try await APIClient.shared.applyOperations(
                 sceneId: current.sceneId,
                 baseVersion: current.version,
-                operations: operations
+                operations: projected
             )
             scene = result.scene
             statusMessage = "Applied \(result.applied) op(s) → v\(result.version)"
@@ -205,10 +244,23 @@ final class SceneSyncStore {
                result.scene.objects.first(where: { $0.id == id }) == nil {
                 selectedObjectId = nil
             }
+            // Kick lookalike mesh generation for newly added catalog products.
+            Task { await Self.ensureMeshesForAddOps(projected) }
         } catch {
             lastError = error.localizedDescription
             statusMessage = "Ops failed"
             await refresh(markAsRoomMap: true)
+        }
+    }
+
+    /// Fire-and-forget: POST /catalog/{productId}/mesh so USDZ/GLB is ready for AR/web.
+    private static func ensureMeshesForAddOps(_ operations: [SceneOperationDTO]) async {
+        let ids = Set(operations.compactMap { op -> String? in
+            guard op.type == .addObject else { return nil }
+            return op.productId
+        })
+        for pid in ids {
+            _ = try? await APIClient.shared.ensureProductMesh(productId: pid)
         }
     }
 
@@ -217,26 +269,42 @@ final class SceneSyncStore {
             lastError = "Select an object first"
             return
         }
-        let next = Vector3(
-            object.transform.position.x + dx,
-            object.transform.position.y,
-            object.transform.position.z + dz
+        let h = object.dimensions?.heightMeters ?? 0.5
+        let seated = Coordinates.projectOntoFloor(
+            Vector3(
+                object.transform.position.x + dx,
+                object.transform.position.y,
+                object.transform.position.z + dz
+            ),
+            heightMeters: h,
+            sitsOnFloor: Coordinates.sitsOnFloor(object)
         )
-        await moveObject(id: object.id, to: next)
+        await moveObject(id: object.id, to: seated)
     }
 
     /// Absolute MOVE_OBJECT (floor-plane drag in Live AR / web twin).
+    /// Optimistic local patch so the mesh does not snap back while the API round-trips.
+    /// Floor-sitting objects keep Y = height/2 (center pivot on Y = 0 floor).
     func moveObject(id: String, to position: Vector3) async {
-        guard let scene else { return }
-        guard let object = scene.objects.first(where: { $0.id == id }) else {
+        guard var current = scene else { return }
+        guard let idx = current.objects.firstIndex(where: { $0.id == id }) else {
             lastError = "Object not found"
             return
         }
-        guard object.type != "wall", object.movable != false else {
+        guard current.objects[idx].type != "wall", current.objects[idx].movable != false else {
             lastError = "Walls stay fixed"
             return
         }
-        await pushOps([.move(objectId: object.id, to: position)])
+        let obj = current.objects[idx]
+        let h = obj.dimensions?.heightMeters ?? 0.5
+        let seated = Coordinates.projectOntoFloor(
+            position,
+            heightMeters: h,
+            sitsOnFloor: Coordinates.sitsOnFloor(obj)
+        )
+        current.objects[idx].transform.position = seated
+        scene = current
+        await pushOps([.move(objectId: id, to: seated)], busy: false)
     }
 
     func removeSelected() async {
@@ -253,6 +321,7 @@ final class SceneSyncStore {
     }
 
     /// Place a catalog product via ADD_OBJECT at `position` (or placement hint / room default).
+    /// Y is always `height/2` so center-pivoted meshes sit on the floor (Y = 0).
     func placeCatalogItem(_ item: CatalogItemDTO, at position: Vector3? = nil) async {
         guard let scene else {
             lastError = "No scene loaded"
@@ -260,7 +329,7 @@ final class SceneSyncStore {
         }
         let id = "ar_\(item.productId)_\(UUID().uuidString.prefix(5))"
         let height = item.dimensions?.heightMeters ?? 0.5
-        let y = height * 0.5
+        let y = Coordinates.seatedY(heightMeters: height)
         let resolved: Vector3
         if let position {
             resolved = Vector3(position.x, y, position.z)
@@ -273,7 +342,14 @@ final class SceneSyncStore {
                 -min(1.1, scene.bounds.length * 0.28)
             )
         }
-        let op = SceneOperationDTO.add(from: item, objectId: id, position: resolved)
+        statusMessage = "Generating lookalike mesh…"
+        // Kick mesh gen first so modelUrl prefers /media/meshes when ops apply.
+        _ = try? await APIClient.shared.ensureProductMesh(productId: item.productId)
+        var itemWithMesh = item
+        if itemWithMesh.modelUrl == nil || itemWithMesh.modelUrl?.hasPrefix("/models/") == true {
+            itemWithMesh.modelUrl = "/media/meshes/\(item.productId).glb"
+        }
+        let op = SceneOperationDTO.add(from: itemWithMesh, objectId: id, position: resolved)
         await pushOps([op])
         selectedObjectId = id
         statusMessage = "Placed \(item.name)"

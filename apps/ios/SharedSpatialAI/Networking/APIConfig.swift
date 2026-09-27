@@ -87,4 +87,16 @@ enum APIConfig {
         components?.queryItems = items
         return components?.url
     }
+
+    /// Resolve `/media/...` or `/models/...` against the configured API host.
+    static func absoluteMediaURL(path: String) -> URL? {
+        let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        if trimmed.hasPrefix("http://") || trimmed.hasPrefix("https://") {
+            return URL(string: trimmed)
+        }
+        let base = baseURL.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let suffix = trimmed.hasPrefix("/") ? trimmed : "/\(trimmed)"
+        return URL(string: base + suffix)
+    }
 }

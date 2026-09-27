@@ -95,3 +95,14 @@ struct CatalogItemDTO: Codable, Equatable, Identifiable, Sendable {
         return String(format: "★ %.1f", rating)
     }
 }
+
+/// Response from `POST /catalog/{productId}/mesh`.
+struct ProductMeshResponseDTO: Codable, Sendable {
+    var productId: String
+    var status: String
+    var provider: String? = nil
+    var modelUrl: String? = nil
+    var modelUrlUsdz: String? = nil
+    var modelUrlGlb: String? = nil
+    var message: String? = nil
+}

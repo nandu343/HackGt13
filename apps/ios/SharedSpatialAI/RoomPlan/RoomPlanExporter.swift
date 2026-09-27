@@ -118,16 +118,20 @@ enum RoomPlanExporter {
         objects: [CapturedRoom.Object]
     ) -> Vector3 {
         if let floor = floors.first {
-            return Coordinates.position(from: floor.transform)
+            let p = Coordinates.position(from: floor.transform)
+            // Keep floor transform XZ if single surface; Y is the floor plane.
+            return p
         }
-        // Fallback: centroid of wall/object positions projected to floor (y from min).
+        // Fallback: AABB center of wall/object positions projected to min Y (floor).
         var points: [Vector3] = walls.map { Coordinates.position(from: $0.transform) }
         points.append(contentsOf: objects.map { Coordinates.position(from: $0.transform) })
         guard !points.isEmpty else { return Vector3(0, 0, 0) }
-        let cx = points.map(\.x).reduce(0, +) / Double(points.count)
-        let cz = points.map(\.z).reduce(0, +) / Double(points.count)
+        let minX = points.map(\.x).min() ?? 0
+        let maxX = points.map(\.x).max() ?? 0
+        let minZ = points.map(\.z).min() ?? 0
+        let maxZ = points.map(\.z).max() ?? 0
         let minY = points.map(\.y).min() ?? 0
-        return Vector3(cx, minY, cz)
+        return Vector3((minX + maxX) * 0.5, minY, (minZ + maxZ) * 0.5)
     }
 
     private static func estimateBounds(

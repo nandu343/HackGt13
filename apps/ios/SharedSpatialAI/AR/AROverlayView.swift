@@ -23,29 +23,41 @@ struct ARViewContainer: UIViewRepresentable {
 
     func makeUIView(context: Context) -> ARView {
         let view = ARView(frame: .zero)
+        view.automaticallyConfigureSession = false
         let config = ARWorldTrackingConfiguration()
         config.planeDetection = [.horizontal, .vertical]
         if ARWorldTrackingConfiguration.supportsSceneReconstruction(.mesh) {
             config.sceneReconstruction = .mesh
         }
+        view.session.delegate = context.coordinator
         view.session.run(config, options: [.resetTracking, .removeExistingAnchors])
-        context.coordinator.root = AnchorEntity(world: .zero)
-        if let root = context.coordinator.root {
-            view.scene.addAnchor(root)
-        }
+
+        // Shared scene Y=0 must be the *detected floor*, not ARKit world origin
+        // (world origin is typically phone height when tracking starts → hover bug).
+        let root = AnchorEntity(world: .zero)
+        root.name = "scene_floor_root"
+        context.coordinator.root = root
+        view.scene.addAnchor(root)
+
         let tap = UITapGestureRecognizer(
             target: context.coordinator,
             action: #selector(Coordinator.handleTap(_:))
         )
+        tap.delegate = context.coordinator
         view.addGestureRecognizer(tap)
         let pan = UIPanGestureRecognizer(
             target: context.coordinator,
             action: #selector(Coordinator.handlePan(_:))
         )
         pan.maximumNumberOfTouches = 1
-        // Prefer draw/drag over ARView's default gestures when active.
-        pan.cancelsTouchesInView = false
+        pan.cancelsTouchesInView = true
+        pan.delegate = context.coordinator
+        context.coordinator.objectPan = pan
         view.addGestureRecognizer(pan)
+        // Camera orbit must wait for our pan to fail (empty space → orbit still works).
+        for gr in view.gestureRecognizers ?? [] where gr !== pan && gr !== tap {
+            gr.require(toFail: pan)
+        }
         context.coordinator.hostView = view
         context.coordinator.applyCallbacks(from: self)
         rebuild(in: view, coordinator: context.coordinator)
@@ -68,10 +80,11 @@ struct ARViewContainer: UIViewRepresentable {
     }
 
     @MainActor
-    final class Coordinator: NSObject {
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate, ARSessionDelegate {
         var parent: ARViewContainer
         var root: AnchorEntity?
         weak var hostView: ARView?
+        weak var objectPan: UIPanGestureRecognizer?
         var onSelect: ((String?) -> Void)?
         var onStrokeComplete: (([Vector3]) -> Void)?
         var onMoveEnd: ((String, Vector3) -> Void)?
@@ -93,9 +106,18 @@ struct ARViewContainer: UIViewRepresentable {
         private var draftMaterial = SimpleMaterial(color: .systemYellow, isMetallic: false)
 
         var draggingObjectId: String?
+        /// Local (scene) Y locked for drag — center pivot seated height, not world Y.
         private var dragLockY: Float = 0
         private var dragStartPos: SIMD3<Float>?
+        /// Finger→object XZ offset so the mesh does not jump under the finger.
+        private var dragOffsetXZ: SIMD3<Float> = .zero
         private var lastHintPublish: CFTimeInterval = 0
+        /// Object ids currently swapping in a remote/bundled USDZ.
+        private var loadingModelIds: Set<String> = []
+
+        /// World-space Y of the lowest horizontal plane (ARKit floor).
+        private(set) var floorWorldY: Float = 0
+        private(set) var hasFloorAlignment = false
 
         init(parent: ARViewContainer) {
             self.parent = parent
@@ -111,19 +133,106 @@ struct ARViewContainer: UIViewRepresentable {
             drawColor = parent.drawColor
         }
 
+        // MARK: - Floor alignment (critical: kill hover)
+
+        nonisolated func session(_ session: ARSession, didAdd anchors: [ARAnchor]) {
+            Task { @MainActor [weak self] in
+                self?.ingestPlanes(anchors)
+            }
+        }
+
+        nonisolated func session(_ session: ARSession, didUpdate anchors: [ARAnchor]) {
+            Task { @MainActor [weak self] in
+                self?.ingestPlanes(anchors)
+            }
+        }
+
+        /// Call on rebuild / hint so we pick up planes that already exist.
+        func refreshFloorFromSession() {
+            guard let frame = hostView?.session.currentFrame else {
+                applyCameraHeightFallback()
+                return
+            }
+            ingestPlanes(frame.anchors)
+            if !hasFloorAlignment {
+                applyCameraHeightFallback(cameraY: frame.camera.transform.columns.3.y)
+            }
+        }
+
+        private func ingestPlanes(_ anchors: [ARAnchor]) {
+            let horizontals = anchors.compactMap { $0 as? ARPlaneAnchor }
+                .filter { $0.alignment == .horizontal }
+            guard let lowest = horizontals.map({ $0.transform.columns.3.y }).min() else { return }
+            applyFloorWorldY(lowest)
+        }
+
+        /// Until ARKit reports a horizontal plane, approximate floor ~1.35 m below the camera.
+        private func applyCameraHeightFallback(cameraY: Float? = nil) {
+            guard !hasFloorAlignment else { return }
+            let camY: Float
+            if let cameraY {
+                camY = cameraY
+            } else if let y = hostView?.session.currentFrame?.camera.transform.columns.3.y {
+                camY = y
+            } else {
+                return
+            }
+            // Typical handheld phone height; better than leaving Y=0 at device origin.
+            root?.position = SIMD3(0, camY - 1.35, 0)
+        }
+
+        private func applyFloorWorldY(_ y: Float) {
+            // Prefer the lowest horizontal plane (true floor over tabletops).
+            if hasFloorAlignment {
+                // Only drop further down (new lower floor), avoid jumping up to tables.
+                if y >= floorWorldY - 0.02 { return }
+            }
+            floorWorldY = y
+            hasFloorAlignment = true
+            // Shared local Y=0 → detected floor. Keep XZ at session origin (user-centric).
+            root?.position = SIMD3(0, floorWorldY, 0)
+        }
+
+        /// World → scene-local (floor-root) position.
+        private func worldToScene(_ world: SIMD3<Float>) -> SIMD3<Float> {
+            guard let root else { return world }
+            return root.convert(position: world, from: nil)
+        }
+
+        /// Seated local Y for an object (center pivot on floor).
+        private func seatedLocalY(for object: SceneObjectDTO) -> Float {
+            let h = Float(object.dimensions?.heightMeters ?? 0.5)
+            if Coordinates.sitsOnFloor(object) {
+                return Coordinates.seatedY(heightMeters: h)
+            }
+            return Float(Coordinates.renderPosition(for: object).y)
+        }
+
+        // MARK: - Gestures
+
+        /// Only claim the pan when drawing or when the finger is on (or near) furniture.
+        func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+            guard gestureRecognizer === objectPan, let view = hostView else { return true }
+            if drawMode { return true }
+            let loc = gestureRecognizer.location(in: view)
+            return furnitureId(at: loc, in: view) != nil
+        }
+
+        func gestureRecognizer(
+            _ gestureRecognizer: UIGestureRecognizer,
+            shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
+        ) -> Bool {
+            // Never share the drag/draw pan with ARView camera orbit.
+            if gestureRecognizer === objectPan || otherGestureRecognizer === objectPan {
+                return false
+            }
+            return true
+        }
+
         @objc func handleTap(_ gesture: UITapGestureRecognizer) {
             guard !drawMode, draggingObjectId == nil, let view = hostView else { return }
             let loc = gesture.location(in: view)
-            let hits = view.hitTest(loc)
-            let name = hits.compactMap { entityName($0.entity) }.first {
-                !$0.isEmpty
-                    && $0 != "floor"
-                    && !$0.hasPrefix("grid_")
-                    && !$0.hasPrefix("ghost_")
-                    && !$0.hasPrefix("stroke_")
-                    && !$0.hasPrefix("draft_")
-            }
-            onSelect?(name)
+            onSelect?(furnitureId(at: loc, in: view))
         }
 
         @objc func handlePan(_ gesture: UIPanGestureRecognizer) {
@@ -134,6 +243,34 @@ struct ARViewContainer: UIViewRepresentable {
             } else {
                 handleObjectDragPan(gesture, at: loc, in: view)
             }
+        }
+
+        private func furnitureId(at loc: CGPoint, in view: ARView) -> String? {
+            let hits = view.hitTest(loc)
+            if let name = hits.compactMap({ entityName($0.entity) }).first(where: isFurnitureName) {
+                return name
+            }
+            // Soft hit: already-selected object stays draggable near its footprint.
+            if let selected = parent.selectedObjectId,
+               let entity = findEntity(named: selected),
+               let hit = floorPlaneHitLocal(at: loc, in: view) {
+                let dx = hit.x - entity.position.x
+                let dz = hit.z - entity.position.z
+                if dx * dx + dz * dz < 0.55 { return selected }
+            }
+            return nil
+        }
+
+        private func isFurnitureName(_ name: String) -> Bool {
+            !name.isEmpty
+                && name != "floor"
+                && name != "scene_floor_root"
+                && !name.hasPrefix("grid_")
+                && !name.hasPrefix("ghost_")
+                && !name.hasPrefix("stroke_")
+                && !name.hasPrefix("draft_")
+                && !name.hasPrefix("scan_")
+                && !name.hasPrefix("loading_")
         }
 
         // MARK: - Drawing (local-first, incremental)
@@ -207,14 +344,7 @@ struct ARViewContainer: UIViewRepresentable {
         ) {
             switch gesture.state {
             case .began:
-                let hits = view.hitTest(loc)
-                let hitName = hits.compactMap { entityName($0.entity) }.first {
-                    !$0.isEmpty
-                        && !$0.hasPrefix("ghost_")
-                        && !$0.hasPrefix("stroke_")
-                        && !$0.hasPrefix("draft_")
-                }
-                guard let id = hitName,
+                guard let id = furnitureId(at: loc, in: view),
                       let obj = parent.scene?.objects.first(where: { $0.id == id }),
                       obj.type != "wall",
                       obj.movable != false,
@@ -227,22 +357,39 @@ struct ARViewContainer: UIViewRepresentable {
                     onSelect?(id)
                 }
                 draggingObjectId = id
-                dragLockY = entity.position.y
+                // Lock to seated floor height (not whatever world Y the mesh currently has).
+                dragLockY = seatedLocalY(for: obj)
+                entity.position.y = dragLockY
                 dragStartPos = entity.position
+                // Keep the grab point under the finger (no center-snap jump).
+                if let hit = floorPlaneHitLocal(at: loc, in: view) {
+                    dragOffsetXZ = SIMD3(
+                        entity.position.x - hit.x,
+                        0,
+                        entity.position.z - hit.z
+                    )
+                } else {
+                    dragOffsetXZ = .zero
+                }
             case .changed:
                 guard let id = draggingObjectId,
                       let entity = findEntity(named: id),
-                      let hit = floorPlaneHit(at: loc, planeY: dragLockY, in: view)
+                      let hit = floorPlaneHitLocal(at: loc, in: view)
                 else { return }
-                entity.position = SIMD3(hit.x, dragLockY, hit.z)
+                entity.position = SIMD3(
+                    hit.x + dragOffsetXZ.x,
+                    dragLockY,
+                    hit.z + dragOffsetXZ.z
+                )
             case .ended, .cancelled:
-                defer {
-                    draggingObjectId = nil
-                    dragStartPos = nil
-                }
                 guard let id = draggingObjectId,
                       let entity = findEntity(named: id)
-                else { return }
+                else {
+                    draggingObjectId = nil
+                    dragStartPos = nil
+                    dragOffsetXZ = .zero
+                    return
+                }
                 let pos = entity.position
                 let moved: Bool = {
                     guard let start = dragStartPos else { return true }
@@ -250,11 +397,23 @@ struct ARViewContainer: UIViewRepresentable {
                     let dz = pos.z - start.z
                     return dx * dx + dz * dz > 0.0001
                 }()
+                let lockY = dragLockY
                 if moved {
+                    // Keep draggingObjectId set briefly so updateUIView does not rebuild
+                    // with the pre-move scene before the optimistic store patch lands.
                     onMoveEnd?(
                         id,
-                        Vector3(Double(pos.x), Double(dragLockY), Double(pos.z))
+                        Vector3(Double(pos.x), Double(lockY), Double(pos.z))
                     )
+                    DispatchQueue.main.async { [weak self] in
+                        self?.draggingObjectId = nil
+                        self?.dragStartPos = nil
+                        self?.dragOffsetXZ = .zero
+                    }
+                } else {
+                    draggingObjectId = nil
+                    dragStartPos = nil
+                    dragOffsetXZ = .zero
                 }
             default:
                 break
@@ -274,18 +433,36 @@ struct ARViewContainer: UIViewRepresentable {
             root?.children.first { $0.name == id }
         }
 
-        private func floorPlaneHit(
-            at screen: CGPoint,
-            planeY: Float,
-            in view: ARView
-        ) -> SIMD3<Float>? {
+        /// Floor XZ under the finger in **scene-local** space (Y ≈ 0 on the floor root).
+        private func floorPlaneHitLocal(at screen: CGPoint, in view: ARView) -> SIMD3<Float>? {
+            refreshFloorFromSession()
+            let results = view.raycast(
+                from: screen,
+                allowing: .existingPlaneGeometry,
+                alignment: .horizontal
+            )
+            // Prefer the lowest hit (floor over tabletops).
+            let sorted = results.sorted {
+                $0.worldTransform.columns.3.y < $1.worldTransform.columns.3.y
+            }
+            if let first = sorted.first {
+                let t = first.worldTransform.columns.3
+                var local = worldToScene(SIMD3(t.x, t.y, t.z))
+                local.y = 0
+                return local
+            }
+            // Math plane at detected floor (world Y), converted to scene-local.
+            let worldFloorY = hasFloorAlignment ? floorWorldY : (root?.position.y ?? 0)
             guard let ray = view.ray(through: screen) else { return nil }
             let origin = ray.origin
             let dir = ray.direction
             guard abs(dir.y) > 1e-5 else { return nil }
-            let t = (planeY - origin.y) / dir.y
+            let t = (worldFloorY - origin.y) / dir.y
             guard t > 0 else { return nil }
-            return origin + dir * t
+            let world = origin + dir * t
+            var local = worldToScene(world)
+            local.y = 0
+            return local
         }
 
         /// Accurate under-finger point: ARView ray through touch, fixed depth along ray.
@@ -293,19 +470,47 @@ struct ARViewContainer: UIViewRepresentable {
             guard let ray = view.ray(through: screen) else { return nil }
             let depth: Float = 1.25
             let world = ray.origin + normalize(ray.direction) * depth
-            return Vector3(Double(world.x), Double(world.y), Double(world.z))
+            let local = worldToScene(world)
+            return Vector3(Double(local.x), Double(local.y), Double(local.z))
         }
 
         func publishPlacementHintIfNeeded() {
             let now = CACurrentMediaTime()
             guard now - lastHintPublish > 0.4, let view = hostView else { return }
             lastHintPublish = now
+            refreshFloorFromSession()
             let center = CGPoint(x: view.bounds.midX, y: view.bounds.midY + 40)
-            if let hit = floorPlaneHit(at: center, planeY: 0, in: view) {
+            if let hit = floorPlaneHitLocal(at: center, in: view) {
                 onPlacementHint?(Vector3(Double(hit.x), 0, Double(hit.z)))
             } else if let ray = view.ray(through: center) {
-                let p = ray.origin + normalize(ray.direction) * 1.6
-                onPlacementHint?(Vector3(Double(p.x), 0, Double(p.z)))
+                let world = ray.origin + normalize(ray.direction) * 1.6
+                let local = worldToScene(world)
+                onPlacementHint?(Vector3(Double(local.x), 0, Double(local.z)))
+            }
+        }
+
+        /// Swap composite stand-in for a bundled/remote USDZ when available (async).
+        func enqueueRemoteModelIfNeeded(for object: SceneObjectDTO, onto entity: Entity) {
+            guard !loadingModelIds.contains(object.id) else { return }
+            guard ProductModelLoader.shouldAttemptUSDZ(for: object) else { return }
+            loadingModelIds.insert(object.id)
+            let objectId = object.id
+            let selected = object.id == parent.selectedObjectId
+            Task { @MainActor in
+                defer { loadingModelIds.remove(objectId) }
+                guard let loaded = await ProductModelLoader.loadUSDZEntity(for: object, selected: selected),
+                      let root = self.root,
+                      self.draggingObjectId != objectId,
+                      let current = root.children.first(where: { $0.name == objectId })
+                else { return }
+                let pos = current.position
+                let orient = current.orientation
+                let scale = current.scale
+                loaded.position = pos
+                loaded.orientation = orient
+                loaded.scale = scale
+                current.removeFromParent()
+                root.addChild(loaded)
             }
         }
     }
@@ -313,6 +518,7 @@ struct ARViewContainer: UIViewRepresentable {
     @MainActor
     private func rebuild(in view: ARView, coordinator: Coordinator) {
         guard let root = coordinator.root else { return }
+        coordinator.refreshFloorFromSession()
         let version = scene?.version ?? -1
         let count = scene?.objects.count ?? -1
         let strokeIds = strokes.map(\.strokeId)
@@ -343,6 +549,7 @@ struct ARViewContainer: UIViewRepresentable {
         for object in scene.objects where object.type != "wall" {
             let entity = FurnitureMeshBuilder.makeEntity(for: object, selected: object.id == selectedObjectId)
             root.addChild(entity)
+            coordinator.enqueueRemoteModelIfNeeded(for: object, onto: entity)
         }
         for ghost in GhostAvatarAnchors.remoteGhosts(from: ghosts, localUserId: APIConfig.actorId) {
             root.addChild(makeGhost(ghost))

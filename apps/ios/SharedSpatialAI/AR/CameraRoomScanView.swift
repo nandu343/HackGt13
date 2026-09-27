@@ -5,7 +5,7 @@ import UIKit
 import simd
 
 #if !targetEnvironment(simulator)
-/// Camera-based room scan: ARKit world tracking + plane detection (works without LiDAR).
+/// Automatic camera room setup: walk around; floors/walls appear; finishes when coverage is stable.
 struct CameraRoomScanView: View {
     var sceneId: String
     var onComplete: (SceneDTO) -> Void
@@ -18,39 +18,56 @@ struct CameraRoomScanView: View {
             CameraRoomScanRepresentable(model: model)
                 .ignoresSafeArea()
 
-            VStack {
-                instructionBanner
+            VStack(spacing: 0) {
+                topHUD
                 Spacer()
                 bottomBar
             }
         }
         .preferredColorScheme(.dark)
+        .onChange(of: model.shouldAutoFinish) { _, ready in
+            if ready { finish() }
+        }
     }
 
-    private var instructionBanner: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Camera scan")
-                .font(.headline)
-            Text(
-                "Walk the room so floors and walls appear. Optional: tap the floor to mark corners. Then Finish scan."
-            )
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            HStack(spacing: 12) {
-                Label("\(model.horizontalCount) floors", systemImage: "square.dashed")
-                Label("\(model.verticalCount) walls", systemImage: "rectangle.split.3x1")
-                Label("\(model.cornerCount) corners", systemImage: "mappin.and.ellipse")
+    private var topHUD: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(model.statusTitle)
+                .font(.title3.weight(.semibold))
+            Text(model.statusDetail)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+
+            ProgressView(value: model.coverage)
+                .tint(.cyan)
+            HStack {
+                Text("Coverage")
+                Spacer()
+                Text("\(Int(model.coverage * 100))%")
+                    .monospacedDigit()
             }
             .font(.caption2)
             .foregroundStyle(.cyan)
+
+            HStack(spacing: 14) {
+                Label("\(model.horizontalCount) floor", systemImage: "square.dashed")
+                Label("\(model.verticalCount) wall", systemImage: "rectangle.split.3x1")
+            }
+            .font(.caption2)
+            .foregroundStyle(.secondary)
         }
-        .padding(14)
+        .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(.ultraThinMaterial)
     }
 
     private var bottomBar: some View {
         VStack(spacing: 10) {
+            if model.isStabilizing {
+                Text("Hold still — finishing…")
+                    .font(.caption)
+                    .foregroundStyle(.cyan)
+            }
             if let err = model.lastError {
                 Text(err)
                     .font(.caption)
@@ -60,10 +77,7 @@ struct CameraRoomScanView: View {
             HStack(spacing: 12) {
                 Button("Cancel") { onCancel() }
                     .buttonStyle(.bordered)
-                Button("Clear corners") { model.clearCorners() }
-                    .buttonStyle(.bordered)
-                    .disabled(model.cornerCount == 0)
-                Button("Finish scan") { finish() }
+                Button(model.canFinish ? "Finish" : "Keep scanning…") { finish() }
                     .buttonStyle(.borderedProminent)
                     .disabled(!model.canFinish)
             }
@@ -74,8 +88,9 @@ struct CameraRoomScanView: View {
     }
 
     private func finish() {
-        let scene = model.buildScene(sceneId: sceneId)
-        onComplete(scene)
+        guard !model.didFinish else { return }
+        model.didFinish = true
+        onComplete(model.buildScene(sceneId: sceneId))
     }
 }
 
@@ -83,55 +98,125 @@ struct CameraRoomScanView: View {
 final class CameraRoomScanModel: ObservableObject {
     @Published var horizontalCount = 0
     @Published var verticalCount = 0
-    @Published var cornerCount = 0
+    @Published var coverage: Double = 0
+    @Published var statusTitle = "Walk around the room"
+    @Published var statusDetail = "Point at floors and walls — setup is automatic."
     @Published var lastError: String?
-    /// Bumped when corners are cleared so the AR overlay can drop markers.
-    @Published var cornerEpoch = 0
+    @Published var shouldAutoFinish = false
+    @Published var isStabilizing = false
+    @Published var didFinish = false
 
     private(set) var planes: [UUID: DetectedPlaneSnapshot] = [:]
-    private(set) var corners: [SIMD3<Float>] = []
+
+    /// Floor area (m²) + wall span used for coverage.
+    private var lastBoundsSignature: String = ""
+    private var stableSince: Date?
+    private let minFloorArea: Float = 2.5
+    private let minWalls = 1
+    private let coverageReady: Double = 0.72
+    private let stableSeconds: TimeInterval = 1.6
 
     var canFinish: Bool {
-        !planes.isEmpty || corners.count >= 3
+        horizontalCount >= 1 && (coverage >= 0.45 || !planes.isEmpty)
     }
 
     func upsertPlane(_ snapshot: DetectedPlaneSnapshot, id: UUID) {
         planes[id] = snapshot
-        refreshCounts()
+        refreshProgress()
     }
 
     func removePlane(id: UUID) {
         planes.removeValue(forKey: id)
-        refreshCounts()
-    }
-
-    func addCorner(_ point: SIMD3<Float>) {
-        if let last = corners.last {
-            let d = point - last
-            if length(d) < 0.15 { return }
-        }
-        corners.append(point)
-        cornerCount = corners.count
-        lastError = nil
-    }
-
-    func clearCorners() {
-        corners.removeAll()
-        cornerCount = 0
-        cornerEpoch += 1
+        refreshProgress()
     }
 
     func buildScene(sceneId: String) -> SceneDTO {
         CameraScanExporter.export(
             sceneId: sceneId,
             planes: Array(planes.values),
-            cornerPoints: corners
+            cornerPoints: []
         )
     }
 
-    private func refreshCounts() {
-        horizontalCount = planes.values.filter { $0.alignment == .horizontal }.count
-        verticalCount = planes.values.filter { $0.alignment == .vertical }.count
+    private func refreshProgress() {
+        let floors = planes.values.filter { $0.alignment == .horizontal }
+        let walls = planes.values.filter { $0.alignment == .vertical }
+        horizontalCount = floors.count
+        verticalCount = walls.count
+
+        let floorArea = floors.reduce(Float(0)) { $0 + $1.extent.x * $1.extent.z }
+        let wallSpan = walls.reduce(Float(0)) { $0 + $1.extent.x }
+
+        let areaScore = min(1.0, Double(floorArea / max(minFloorArea, 0.1)))
+        let wallScore = min(1.0, Double(walls.count) / Double(max(minWalls, 1)) * 0.35
+            + min(1.0, Double(wallSpan / 4.0)) * 0.65)
+        // Floor dominates; walls unlock the last ~30%.
+        coverage = min(1.0, areaScore * 0.7 + wallScore * 0.3)
+
+        let sig = boundsSignature()
+        if coverage >= coverageReady && horizontalCount >= 1 {
+            if sig == lastBoundsSignature {
+                if stableSince == nil { stableSince = Date() }
+                let held = Date().timeIntervalSince(stableSince ?? Date())
+                isStabilizing = held > 0.4
+                if held >= stableSeconds, !didFinish {
+                    statusTitle = "Room ready"
+                    statusDetail = "Finishing automatically…"
+                    shouldAutoFinish = true
+                } else {
+                    statusTitle = "Looking good"
+                    statusDetail = "Hold still a moment while bounds settle."
+                }
+            } else {
+                lastBoundsSignature = sig
+                stableSince = Date()
+                isStabilizing = false
+                statusTitle = "Keep moving…"
+                statusDetail = "Coverage is high — slow walk to confirm edges."
+            }
+        } else if horizontalCount == 0 {
+            stableSince = nil
+            isStabilizing = false
+            statusTitle = "Find the floor"
+            statusDetail = "Tilt the phone down and walk slowly."
+        } else if coverage < 0.4 {
+            stableSince = nil
+            isStabilizing = false
+            statusTitle = "Keep moving…"
+            statusDetail = "Sweep left and right so more floor appears."
+        } else {
+            stableSince = nil
+            isStabilizing = false
+            statusTitle = "Almost there"
+            statusDetail = walls.isEmpty
+                ? "Turn toward a wall so the room bounds lock in."
+                : "A bit more floor coverage, then we’ll finish."
+        }
+    }
+
+    private func boundsSignature() -> String {
+        let pts = planes.values.flatMap { plane -> [SIMD3<Float>] in
+            let hx = plane.extent.x * 0.5
+            let hz = plane.extent.z * 0.5
+            let locals: [SIMD3<Float>] = [
+                SIMD3(-hx, 0, -hz), SIMD3(hx, 0, -hz),
+                SIMD3(hx, 0, hz), SIMD3(-hx, 0, hz)
+            ]
+            return locals.map { local in
+                let c = plane.transform * SIMD4<Float>(local.x, local.y, local.z, 1)
+                return SIMD3(c.x, c.y, c.z)
+            }
+        }
+        guard let first = pts.first else { return "empty" }
+        var minX = first.x, maxX = first.x, minZ = first.z, maxZ = first.z
+        for p in pts.dropFirst() {
+            minX = min(minX, p.x); maxX = max(maxX, p.x)
+            minZ = min(minZ, p.z); maxZ = max(maxZ, p.z)
+        }
+        // Quantize so tiny plane jitter doesn't reset stability.
+        let qx = Int((maxX - minX) * 5)
+        let qz = Int((maxZ - minZ) * 5)
+        return "\(qx)x\(qz)_\(horizontalCount)_\(verticalCount)"
     }
 }
 
@@ -144,60 +229,39 @@ struct CameraRoomScanRepresentable: UIViewRepresentable {
 
         let config = ARWorldTrackingConfiguration()
         config.planeDetection = [.horizontal, .vertical]
-        // Never require LiDAR mesh / scene reconstruction for this path.
         view.session.delegate = context.coordinator
         view.session.run(config, options: [.resetTracking, .removeExistingAnchors])
 
         context.coordinator.hostView = view
         context.coordinator.model = model
-
-        let tap = UITapGestureRecognizer(
-            target: context.coordinator,
-            action: #selector(Coordinator.handleTap(_:))
-        )
-        view.addGestureRecognizer(tap)
         return view
     }
 
     func updateUIView(_ uiView: ARView, context: Context) {
         context.coordinator.model = model
-        context.coordinator.syncCornerMarkersIfNeeded()
     }
 
     func makeCoordinator() -> Coordinator {
         Coordinator(model: model)
     }
 
-    /// UI + `@MainActor` model live here; ARSessionDelegate entry points are `nonisolated`
-    /// and hop onto the main actor before touching `cornerEpoch` / overlays.
     @MainActor
     final class Coordinator: NSObject, ARSessionDelegate {
         var model: CameraRoomScanModel
         weak var hostView: ARView?
-        private var cornerMarkers: [Entity] = []
         private var planeEntities: [UUID: ModelEntity] = [:]
         private let overlayRoot = AnchorEntity(world: .zero)
-        private var lastCornerEpoch = 0
 
         init(model: CameraRoomScanModel) {
             self.model = model
             super.init()
         }
 
-        func syncCornerMarkersIfNeeded() {
-            guard model.cornerEpoch != lastCornerEpoch else { return }
-            lastCornerEpoch = model.cornerEpoch
-            cornerMarkers.forEach { $0.removeFromParent() }
-            cornerMarkers.removeAll()
-        }
-
         nonisolated func session(_ session: ARSession, didAdd anchors: [ARAnchor]) {
             let updates = CameraScanPlaneUpdate.makeList(from: anchors)
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                for update in updates {
-                    self.upsert(update)
-                }
+                for update in updates { self.upsert(update) }
             }
         }
 
@@ -205,9 +269,7 @@ struct CameraRoomScanRepresentable: UIViewRepresentable {
             let updates = CameraScanPlaneUpdate.makeList(from: anchors)
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                for update in updates {
-                    self.upsert(update)
-                }
+                for update in updates { self.upsert(update) }
             }
         }
 
@@ -254,9 +316,8 @@ struct CameraRoomScanRepresentable: UIViewRepresentable {
             let h = max(extent.z, 0.05)
             let color: UIColor = alignment == .horizontal
                 ? .systemCyan.withAlphaComponent(0.28)
-                : .systemPurple.withAlphaComponent(0.22)
+                : .systemTeal.withAlphaComponent(0.20)
 
-            // Replace mesh by recreating the entity (avoids fragile ModelComponent mutation).
             planeEntities[id]?.removeFromParent()
             let entity = ModelEntity(
                 mesh: .generatePlane(width: w, depth: h),
@@ -267,45 +328,9 @@ struct CameraRoomScanRepresentable: UIViewRepresentable {
             planeEntities[id] = entity
             overlayRoot.addChild(entity)
         }
-
-        @objc func handleTap(_ gesture: UITapGestureRecognizer) {
-            guard let view = hostView else { return }
-            let loc = gesture.location(in: view)
-            // Prefer horizontal plane hits so corners sit on the floor/table.
-            let results = view.raycast(
-                from: loc,
-                allowing: .existingPlaneGeometry,
-                alignment: .horizontal
-            )
-            guard let hit = results.first else {
-                model.lastError = "Tap a detected floor or table plane to set a corner."
-                return
-            }
-            let p = hit.worldTransform.columns.3
-            let point = SIMD3<Float>(p.x, p.y, p.z)
-            model.addCorner(point)
-            addCornerMarker(at: point)
-        }
-
-        private func addCornerMarker(at point: SIMD3<Float>) {
-            guard let view = hostView else { return }
-            if overlayRoot.scene == nil {
-                view.scene.addAnchor(overlayRoot)
-            }
-            let marker = ModelEntity(
-                mesh: .generateSphere(radius: 0.06),
-                materials: [SimpleMaterial(color: .systemYellow, isMetallic: false)]
-            )
-            marker.position = point
-            marker.name = "scan_corner_\(cornerMarkers.count)"
-            overlayRoot.addChild(marker)
-            cornerMarkers.append(marker)
-        }
     }
 }
 
-/// Sendable plane snapshot extracted on the AR session queue before MainActor work.
-/// Kept outside `@MainActor` Coordinator so it does not inherit actor isolation.
 private struct CameraScanPlaneUpdate: Sendable {
     let id: UUID
     let center: SIMD3<Float>
@@ -319,7 +344,6 @@ private struct CameraScanPlaneUpdate: Sendable {
             let transform = plane.transform
             let alignment: DetectedPlaneSnapshot.Alignment =
                 plane.alignment == .vertical ? .vertical : .horizontal
-            // Prefer planeExtent (iOS 16+) over deprecated `extent`.
             return CameraScanPlaneUpdate(
                 id: plane.identifier,
                 center: SIMD3(

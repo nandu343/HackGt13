@@ -6,17 +6,37 @@ Working client that proves **one scene graph, two renderers**: this app and the 
 
 **LiDAR is optional.** Any ARKit world-tracking iPhone can **Scan with camera** and use **Live AR**. RoomPlan is a secondary “Detailed scan (LiDAR)” path when available.
 
+## Coordinate convention (floor seating)
+
+Shared with the web twin / `packages/schema`:
+
+| Rule | Value |
+|------|--------|
+| Units | **Meters** |
+| Up axis | **+Y** |
+| Origin | **Floor center** of the room |
+| Floor plane | **Y = 0** |
+| Mesh pivot | **Center** (RealityKit boxes / fitted USDZ AABB) |
+| Floor-sitting `position.y` | **`heightMeters / 2`** so the visual bottom rests on Y = 0 |
+
+**Why objects used to hover:** Live AR parented the scene at `AnchorEntity(world: .zero)`. ARKit’s world origin is typically at **phone height** when tracking starts, while scene Y = 0 means the **floor**. A sofa stored at Y ≈ 0.41 therefore appeared ~1.5 m above the real floor.
+
+**Fix:** `AROverlayView` keeps a `scene_floor_root` whose world Y tracks the **lowest horizontal ARKit plane** (with a camera-height fallback until a plane locks). Scene-local Y = 0 is then the real floor. Drag / placement hints raycast onto that floor and convert into scene-local XZ; catalog + AI `ADD_OBJECT` / `MOVE_OBJECT` ops are projected to `Y = height/2`.
+
+Pendant / string-light types keep authored Y (not floor-forced). Elevated scan plane anchors (`plane_cam_*`) keep measured height.
+
 ## Judge demo script (≈4 minutes)
 
 1. **API on Mac** (repo root): `npm run setup` once, then `npm run dev:api` (binds `0.0.0.0:8000`).
 2. **Xcode** → open `apps/ios/SharedSpatialAI.xcodeproj` → Team signing → run on a physical iPhone.
 3. **Settings (gear)** → Base URL `http://<Mac-LAN-IP>:8000` → **Save** → **Test connection** (must say OK). Scene ID `scene_party_001`.
-4. **Scan with camera** → walk until cyan floor / purple wall planes appear → optionally tap floor corners → **Finish scan**. App POSTs the scene and opens Live AR.
-5. **Place (+)** → search “sofa” / “lamp” / “rug” → place several SKUs. Each mesh is distinct and sized to catalog meters (sofa ≈ 2.1 m wide).
-6. **Tap + drag** furniture on the floor; **Remove** from the selection card.
-7. **Pencil** → draw in space (ink under finger) → switch Gold/Cyan → **Clear mine**.
-8. **Wand (Plan)** → Party scenario → **Get AI recommendations** → **Open website** on a value pick → **Accept into scene**.
-9. **Invite** → copy join link → open on laptop web twin (`:3000`) to show shared scene / presence when WS is up.
+4. **Scan with camera** → walk until the coverage meter fills → app **auto-finishes** (or tap Finish). App POSTs the scene and opens Live AR.
+5. **Point at the floor** briefly so ARKit locks a horizontal plane (furniture should sit, not float).
+6. **Place (+)** → search “sofa” / “lamp” / “rug” → place several SKUs. Meshes are product-specific (catalog meters) and load lookalike GLB/USDZ from the API when available.
+7. **Tap + drag** furniture on the floor (follows finger, commits MOVE_OBJECT); **Remove** from the selection card.
+8. **Pencil** → draw in space (ink under finger) → switch Gold/Cyan → **Clear mine**.
+9. **Wand (Plan)** → Party scenario → **Get AI recommendations** → **Open website** on a value pick → **Accept into scene**.
+10. **Invite** → copy join link → open on laptop web twin (`:3000`) to show shared scene / presence when WS is up.
 
 Fallback without a room: **Use demo room instead** on the scan gate (or Simulator).
 
@@ -24,14 +44,15 @@ Fallback without a room: **Use demo room instead** on the scan gate (or Simulato
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| **1:1 product meshes** | Done | Per-SKU RealityKit composites; optional USDZ in `Models/` scaled to `dimensions` (m). |
+| **Floor-aligned 1:1 meshes** | Done | Scene root Y follows ARKit floor; pivot = center → `y = h/2`. |
+| **1:1 product meshes** | Done | Per-SKU RealityKit composites + async USDZ from `/media/meshes` (Meshy or local). |
 | **Catalog Place (all SKUs)** | Done | Searchable + category filter; sofa/table/lamp/plant/rug/screen/… not chair-only. |
-| **Drag to move / Remove** | Done | Floor-plane drag → `MOVE_OBJECT`; trash → `DELETE_OBJECT`. |
+| **Drag to move / Remove** | Done | Floor-plane drag with grab offset → optimistic `MOVE_OBJECT`; trash → `DELETE_OBJECT`. |
 | **Instant draw** | Done | Local-first segments; WS on finger-up; colors + clear mine/all. |
 | **Plan + Open website** | Done | `/ai/layout` preview → value picks → retailer URLs. |
 | **Invite / WS presence** | Done | Invite link + WS strokes/presence when API reachable. |
 | **Settings API URL sticks** | Done | UserDefaults overrides env; Test connection + clear errors. |
-| **Camera scan / RoomPlan** | Done | Non-LiDAR ARKit planes primary; LiDAR RoomPlan optional. |
+| **Camera scan / RoomPlan** | Done | Auto walk-around plane coverage (primary); LiDAR RoomPlan optional. |
 
 ## Product → model mapping
 
@@ -54,7 +75,14 @@ Fallback without a room: **Use demo room instead** on the scan gate (or Simulato
 | `rug_party_01` | Dance rug | `rugRectangle` | 2.00 × 0.02 × 2.00 m |
 | `projector_screen_01` | Projector screen | `projector_screen` | 2.40 × 1.50 × 0.06 m |
 
-**Scale rule:** fit model AABB to `dimensions.width/height/depth` in meters (same as web GLB fitting). See `ProductModelCatalog.swift` + `FurnitureMeshBuilder.swift`. USDZ drop-in: `SharedSpatialAI/Models/README.md`.
+**Scale rule:** fit model AABB to `dimensions.width/height/depth` in meters (same as web GLB fitting). See `ProductModelCatalog.swift` + `FurnitureMeshBuilder.swift` + `ProductModelLoader.swift`. USDZ drop-in: `SharedSpatialAI/Models/README.md`.
+
+### AI product lookalikes
+
+1. Place or Accept AI ops → API `ensure_product_mesh` writes `apps/api/storage/meshes/{productId}.glb` (keyword + exact meters).
+2. With `MESHY_API_KEY` in `.env`, a background Meshy text-to-3D job upgrades to photoreal GLB + USDZ.
+3. iOS loads `http://<mac>:8000/media/meshes/{id}.usdz` async (spinner/composite until ready); web uses the GLB URL.
+4. Manual: `POST /catalog/{productId}/mesh`.
 
 ## Open in Xcode
 
@@ -117,6 +145,8 @@ apps/ios/
 | `POST` | `/scene` | Scan / demo upload |
 | `POST` | `/scene/{id}/operations` | Move / place / delete / AI accept |
 | `GET` | `/catalog` | Place picker |
+| `POST` | `/catalog/{productId}/mesh` | Generate / cache lookalike mesh |
+| `GET` | `/media/meshes/{file}` | Serve GLB/USDZ |
 | `POST` | `/ai/layout` | Plan recommendations |
 | `POST` | `/scene/{id}/invites` | Invite link |
 | `WS` | `/ws/scene/{id}` | Draw + presence |

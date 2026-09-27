@@ -50,9 +50,25 @@ type ModelRef = {
   type?: string;
 };
 
+const API_BASE = (process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000').replace(/\/$/, '');
+
+/** Absolute URL for API-hosted assets (/media/meshes/…); leave /models/* relative for Next static. */
+export function absoluteAssetUrl(path: string): string {
+  if (path.startsWith('http://') || path.startsWith('https://')) return path;
+  if (path.startsWith('/media/')) return `${API_BASE}${path}`;
+  return path;
+}
+
 /** Resolve a GLB path for a scene/catalog object; null → box fallback. */
 export function resolveModelUrl(obj: ModelRef): string | null {
-  if (obj.modelUrl && obj.modelUrl.length > 0) return obj.modelUrl;
+  if (obj.modelUrl && obj.modelUrl.length > 0) {
+    let path = obj.modelUrl;
+    // Generated lookalikes — web needs GLB (not USDZ).
+    if (path.endsWith('.usdz')) {
+      path = path.replace(/\.usdz$/i, '.glb');
+    }
+    return absoluteAssetUrl(path);
+  }
   if (obj.assetId && ASSET_MODEL_URL[obj.assetId]) return ASSET_MODEL_URL[obj.assetId];
   if (obj.productId && PRODUCT_MODEL_URL[obj.productId]) {
     return PRODUCT_MODEL_URL[obj.productId];

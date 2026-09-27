@@ -82,6 +82,14 @@ def apply_operations(
             )
             clamped, _ = clamp_position_to_bounds(position, working, dims_tuple)
             model_url = op.model_url or (product.model_url if product else None)
+            if product is not None:
+                try:
+                    from .mesh import ensure_product_mesh
+
+                    mesh = ensure_product_mesh(product)
+                    model_url = mesh.model_url_usdz or mesh.model_url_glb or model_url
+                except Exception:
+                    pass
             if not model_url:
                 from .model_assets import resolve_model_url
 

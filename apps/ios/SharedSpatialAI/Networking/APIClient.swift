@@ -167,6 +167,19 @@ actor APIClient {
         return try decode(SceneInviteDTO.self, from: data)
     }
 
+    /// POST /catalog/{productId}/mesh — generate/cache product lookalike (Meshy or local).
+    @discardableResult
+    func ensureProductMesh(productId: String) async throws -> ProductMeshResponseDTO {
+        let url = try endpoint("catalog/\(productId)/mesh")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = 120
+        request.httpBody = Data("{}".utf8)
+        let data = try await data(for: request)
+        return try decode(ProductMeshResponseDTO.self, from: data)
+    }
+
     // MARK: - Internals
 
     private func endpoint(_ path: String) throws -> URL {

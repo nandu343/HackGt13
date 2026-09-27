@@ -91,14 +91,16 @@ enum CameraScanExporter {
             minZ = min(minZ, p.z); maxZ = max(maxZ, p.z)
         }
 
-        // Prefer horizontal plane height for floor Y when available.
-        let floorY = planes
-            .filter { $0.alignment == .horizontal }
-            .map(\.center.y)
-            .min()
-            .map { Double($0) }
-            ?? Double(minY)
+        // Prefer the lowest horizontal plane as floor Y when available.
+        let floorCandidates = planes.filter { $0.alignment == .horizontal }
+        let floorY: Double
+        if let lowest = floorCandidates.map(\.center.y).min() {
+            floorY = Double(lowest)
+        } else {
+            floorY = Double(minY)
+        }
 
+        // Room origin: floor center in XZ, Y on the detected floor plane.
         let origin = Vector3(
             Double((minX + maxX) * 0.5),
             floorY,

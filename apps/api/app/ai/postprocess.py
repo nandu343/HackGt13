@@ -112,7 +112,9 @@ def postprocess_layout(
         )
 
     # Attach modelUrl from catalog onto ADD_OBJECT ops so clients render GLB/USDZ meshes.
+    # Prefer generated lookalike under /media/meshes when available.
     from ..model_assets import resolve_model_url
+    from ..mesh import ensure_product_mesh
 
     hydrated = []
     for op in cleaned:
@@ -123,6 +125,13 @@ def postprocess_layout(
                 or (product.model_url if product else None)
                 or resolve_model_url(asset_id=op.asset_id, product_id=op.product_id)
             )
+            if product is not None:
+                try:
+                    mesh = ensure_product_mesh(product)
+                    # Prefer USDZ for AR clients, else generated GLB, else catalog URL.
+                    url = mesh.model_url_usdz or mesh.model_url_glb or url
+                except Exception:
+                    pass
             if url and op.model_url != url:
                 op = op.model_copy(update={'model_url': url})
             if product and not op.asset_id and product.asset_id:

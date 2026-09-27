@@ -29,8 +29,12 @@ Add them to the Xcode target (Copy Bundle Resources).
 
 ## Scale
 
-`FurnitureMeshBuilder` always fits the loaded USDZ **visual bounds** to catalog
-`dimensions` (width × height × depth in **meters**). A 2.1 m sofa is ~2.1 m in AR.
+`FurnitureMeshBuilder` / `ProductModelLoader` fit the loaded USDZ **visual bounds** to
+catalog `dimensions` (width × height × depth in **meters**) and **center** the AABB on
+the entity origin. Floor-sitting objects are placed at `position.y = height / 2` so the
+mesh bottom rests on shared floor Y = 0 (Live AR root is aligned to the ARKit floor plane).
+
+A 2.1 m sofa is ~2.1 m in AR.
 
 ## Converting GLB → USDZ (Mac only)
 

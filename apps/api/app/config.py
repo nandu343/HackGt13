@@ -60,6 +60,13 @@ class Settings:
             self.lock_ttl_seconds = int(os.getenv('LOCK_TTL_SECONDS', '30'))
         except ValueError:
             self.lock_ttl_seconds = 30
+        # Optional Meshy text-to-3D for product lookalike meshes
+        self.meshy_api_key = os.getenv('MESHY_API_KEY', '').strip()
+        # Optional Tripo alias (not implemented as primary — documented for hackathon)
+        self.tripo_api_key = (
+            os.getenv('TRIPOSR_API_KEY', '').strip()
+            or os.getenv('TRIPO_API_KEY', '').strip()
+        )
 
     @property
     def use_supabase(self) -> bool:

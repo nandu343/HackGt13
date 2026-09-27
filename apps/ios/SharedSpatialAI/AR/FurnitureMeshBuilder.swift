@@ -12,10 +12,12 @@ enum FurnitureMeshBuilder {
         let d = Float(object.dimensions?.depthMeters ?? 0.5)
         let meshKey = ProductModelCatalog.meshKey(for: object)
         let scaleSIMD = Coordinates.toSIMD(object.transform.scale ?? Vector3(1, 1, 1))
+        // Center-pivoted meshes: Y = height/2 puts the visual bottom on the floor (Y = 0).
+        let seatedPosition = Coordinates.toSIMD(Coordinates.renderPosition(for: object))
 
-        // 1) Prefer real USDZ (bundle Models/ or remote .usdz) scaled 1:1 to dimensions.
-        if let usdz = tryLoadProductUSDZ(for: object, width: w, height: h, depth: d) {
-            usdz.position = Coordinates.toSIMD(object.transform.position)
+        // 1) Prefer bundled USDZ only here (sync). Remote/HTTP USDZ loads async via ProductModelLoader.
+        if let usdz = tryLoadBundledUSDZ(for: object, width: w, height: h, depth: d) {
+            usdz.position = seatedPosition
             usdz.orientation = Coordinates.toSIMDQuat(object.transform.rotation)
             usdz.scale = scaleSIMD
             if selected { addSelectionRing(to: usdz, width: w, height: h, depth: d, name: object.id) }
@@ -26,7 +28,7 @@ enum FurnitureMeshBuilder {
         // 2) Product-specific composite at exact catalog meters.
         let parent = Entity()
         parent.name = object.id
-        parent.position = Coordinates.toSIMD(object.transform.position)
+        parent.position = seatedPosition
         parent.orientation = Coordinates.toSIMDQuat(object.transform.rotation)
         parent.scale = scaleSIMD
 
@@ -80,6 +82,11 @@ enum FurnitureMeshBuilder {
             addGenericBox(to: parent, w: w, h: h, d: d, mat: mat, name: name)
         }
 
+        // Center-pivot contract: visual AABB bottom at local y = −h/2, top at +h/2.
+        if meshKey != .wall {
+            alignVisualBottom(of: parent, height: h)
+        }
+
         if selected {
             addSelectionRing(to: parent, width: w, height: h, depth: d, name: name)
         }
@@ -89,9 +96,15 @@ enum FurnitureMeshBuilder {
 
     // MARK: - USDZ load + 1:1 scale
 
-    /// Load USDZ from bundle `Models/{stem}.usdz`, bundle root, or remote URL ending in `.usdz`.
-    /// Fits visual bounds to catalog width/height/depth meters (web GLB parity).
-    private static func tryLoadProductUSDZ(
+    /// Public hook for ProductModelLoader selection chrome.
+    static func addSelectionRingPublic(
+        to parent: Entity, width: Float, height: Float, depth: Float, name: String
+    ) {
+        addSelectionRing(to: parent, width: width, height: height, depth: depth, name: name)
+    }
+
+    /// Sync load from app bundle only. Remote URLs must go through ProductModelLoader (async).
+    private static func tryLoadBundledUSDZ(
         for object: SceneObjectDTO,
         width: Float,
         height: Float,
@@ -111,17 +124,12 @@ enum FurnitureMeshBuilder {
 
         if let raw = object.modelUrl {
             let lower = raw.lowercased()
-            if lower.hasSuffix(".usdz") {
-                if raw.hasPrefix("http://") || raw.hasPrefix("https://"), let u = URL(string: raw) {
-                    candidates.append(u)
-                } else if let stem2 = ProductModelCatalog.assetStem(fromModelUrl: raw) {
-                    if let u = Bundle.main.url(forResource: stem2, withExtension: "usdz", subdirectory: "Models") {
-                        candidates.append(u)
-                    }
-                }
-            } else if lower.hasSuffix(".glb"), let stem2 = ProductModelCatalog.assetStem(fromModelUrl: raw) {
-                // Catalog points at web GLB — try matching USDZ in the iOS bundle.
+            if let stem2 = ProductModelCatalog.assetStem(fromModelUrl: raw),
+               lower.hasSuffix(".usdz") || lower.hasSuffix(".glb") {
                 if let u = Bundle.main.url(forResource: stem2, withExtension: "usdz", subdirectory: "Models") {
+                    candidates.append(u)
+                }
+                if let u = Bundle.main.url(forResource: stem2, withExtension: "usdz") {
                     candidates.append(u)
                 }
             }
@@ -138,7 +146,7 @@ enum FurnitureMeshBuilder {
         return nil
     }
 
-    /// Scale + center a loaded model so its AABB matches catalog meters.
+    /// Scale + center a loaded model so its AABB matches catalog meters (center pivot).
     private static func fitChildToDimensions(
         _ model: Entity,
         in parent: Entity,
@@ -153,12 +161,38 @@ enum FurnitureMeshBuilder {
         guard size.x > 1e-4, size.y > 1e-4, size.z > 1e-4 else { return }
         model.scale = SIMD3(width / size.x, height / size.y, depth / size.z)
         let scaled = model.visualBounds(relativeTo: parent)
+        // Center the AABB on the parent origin → with parent.y = h/2, bottom sits on floor.
         model.position = -scaled.center
+    }
+
+    /// Shift composite children so the visual bottom is at local y = −height/2.
+    private static func alignVisualBottom(of parent: Entity, height: Float) {
+        let bounds = parent.visualBounds(relativeTo: parent)
+        let bottom = bounds.center.y - bounds.extents.y * 0.5
+        let targetBottom = -height * 0.5
+        let dy = targetBottom - bottom
+        guard abs(dy) > 0.002 else { return }
+        for child in parent.children {
+            child.position.y += dy
+        }
     }
 
     private static func enableCollisions(on root: Entity) {
         root.visitModels { model in
             model.generateCollisionShapes(recursive: false)
+        }
+        // Invisible parent box so hit-tests / drag work even if child parts are thin.
+        let bounds = root.visualBounds(relativeTo: nil)
+        let ext = bounds.extents
+        if ext.x > 0.02, ext.y > 0.02, ext.z > 0.02 {
+            let proxy = ModelEntity(
+                mesh: .generateBox(width: ext.x, height: ext.y, depth: ext.z),
+                materials: [SimpleMaterial(color: UIColor(white: 1, alpha: 0.01), isMetallic: false)]
+            )
+            proxy.name = root.name
+            proxy.position = bounds.center
+            proxy.generateCollisionShapes(recursive: false)
+            root.addChild(proxy)
         }
     }
 

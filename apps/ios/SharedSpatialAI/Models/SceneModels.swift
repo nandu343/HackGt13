@@ -2,6 +2,7 @@ import Foundation
 
 /// Canonical scene graph DTOs — mirror `packages/schema` (camelCase JSON).
 /// Coordinate convention: **Y-up meters**, room origin at floor center.
+/// Floor-sitting objects use **center pivot**: `position.y = heightMeters / 2`.
 
 struct Vector3: Codable, Equatable, Sendable {
     var x: Double
