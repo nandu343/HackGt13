@@ -18,7 +18,7 @@ struct InviteSheet: View {
                         .foregroundStyle(.secondary)
                 }
 
-                Section("Invite link") {
+                Section {
                     if let link {
                         Text(link)
                             .font(.caption.monospaced())
@@ -39,6 +39,8 @@ struct InviteSheet: View {
                         Text("No link yet")
                             .foregroundStyle(.secondary)
                     }
+                } header: {
+                    Text("Invite link")
                 }
 
                 if let err = store.lastError {

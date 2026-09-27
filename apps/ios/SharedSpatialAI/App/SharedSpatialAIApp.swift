@@ -148,7 +148,7 @@ struct SettingsView: View {
                     )
                 }
 
-                Section("Scene") {
+                Section {
                     Button {
                         Task { await store.refresh(markAsRoomMap: true) }
                     } label: {
@@ -175,12 +175,16 @@ struct SettingsView: View {
                             .foregroundStyle(.red)
                             .textSelection(.enabled)
                     }
+                } header: {
+                    Text("Scene")
                 }
 
-                Section("Coordinates") {
+                Section {
                     Text("Y-up meters · origin at floor center · same schema as the web twin.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
+                } header: {
+                    Text("Coordinates")
                 }
             }
             .scrollContentBackground(.hidden)

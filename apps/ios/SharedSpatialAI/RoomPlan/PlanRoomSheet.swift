@@ -97,7 +97,7 @@ struct PlanRoomSheet: View {
                 .foregroundStyle(.secondary)
         }
 
-        Section("Scenario") {
+        Section {
             Picker("Scenario", selection: $scenario) {
                 ForEach(Scenario.allCases) { s in
                     Text(s.label).tag(s)
@@ -111,9 +111,11 @@ struct PlanRoomSheet: View {
                 axis: .vertical
             )
             .lineLimit(2...4)
+        } header: {
+            Text("Scenario")
         }
 
-        Section("Constraints") {
+        Section {
             Stepper("Guests: \(guestCount)", value: $guestCount, in: 1...100)
             HStack {
                 Text("Budget")
@@ -123,6 +125,8 @@ struct PlanRoomSheet: View {
                     .multilineTextAlignment(.trailing)
                     .frame(maxWidth: 140)
             }
+        } header: {
+            Text("Constraints")
         }
 
         Section {
@@ -141,7 +145,7 @@ struct PlanRoomSheet: View {
 
     @ViewBuilder
     private var previewSections: some View {
-        Section("Layout") {
+        Section {
             if let preview {
                 LabeledContent("Scenario", value: preview.scenario.capitalized)
                 if let mode = preview.plannerMode {
@@ -151,10 +155,12 @@ struct PlanRoomSheet: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
+        } header: {
+            Text("Layout")
         }
 
         if let picks = preview?.valuePicks, !picks.isEmpty {
-            Section("Recommended products") {
+            Section {
                 ForEach(picks) { pick in
                     VStack(alignment: .leading, spacing: 8) {
                         HStack {
@@ -186,10 +192,12 @@ struct PlanRoomSheet: View {
                     }
                     .padding(.vertical, 4)
                 }
+            } header: {
+                Text("Recommended products")
             }
         }
 
-        Section("Operations") {
+        Section {
             if let preview {
                 ForEach(Array(preview.operations.enumerated()), id: \.offset) { _, op in
                     Text(opSummary(op))
@@ -201,6 +209,8 @@ struct PlanRoomSheet: View {
                     }
                 }
             }
+        } header: {
+            Text("Operations")
         }
 
         Section {
