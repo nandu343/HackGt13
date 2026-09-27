@@ -103,6 +103,7 @@ def _add_product_op(
         object_type=object_type or product.category or product.name,
         product_id=product.product_id,
         asset_id=product.asset_id,
+        model_url=product.model_url,
         target_position=position,
         target_rotation=rotation or [0, 0, 0, 1],
         dimensions=product.dimensions,

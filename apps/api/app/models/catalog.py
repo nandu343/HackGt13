@@ -56,6 +56,11 @@ class Product(CamelModel):
     currency: str = 'USD'
     dimensions: Dimensions | None = None
     asset_id: str | None = None
+    # Public web path to GLB (or USDZ for iOS) e.g. /models/sofa.glb
+    model_url: str | None = None
+    # Retailer product page — Shop / Recommendations "Open website".
+    product_url: str | None = None
+    website_url: str | None = None
     tags: list[str] | None = None
     purchasable: bool = True
     virtual_only: bool = False

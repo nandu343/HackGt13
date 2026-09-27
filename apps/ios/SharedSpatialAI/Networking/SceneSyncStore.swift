@@ -17,6 +17,14 @@ final class SceneSyncStore {
     /// Presence for ghost avatars (WS when connected; stubs offline).
     var presenceGhosts: [PresenceUserDTO] = []
     var wsConnected = false
+    /// Active stroke color (hex) for Live AR draw mode.
+    var drawColor: String = "#e2b45c"
+    /// Cached GET /catalog for Place picker + AI “Open website”.
+    var catalog: [CatalogItemDTO] = []
+    /// Last AI layout preview (value picks / product URLs).
+    var lastLayout: LayoutResponseDTO?
+    /// Hint from Live AR: floor point in front of camera for catalog ADD_OBJECT.
+    var placementHint: Vector3?
 
     private(set) var sceneId: String
     private let realtime = SceneWebSocket()
@@ -52,6 +60,10 @@ final class SceneSyncStore {
         return scene.objects.first { $0.id == id }
     }
 
+    func catalogItem(productId: String) -> CatalogItemDTO? {
+        catalog.first { $0.productId == productId }
+    }
+
     func connectRealtime() {
         realtime.connect(sceneId: sceneId)
     }
@@ -60,27 +72,35 @@ final class SceneSyncStore {
         realtime.disconnect()
     }
 
-    func addStroke(points: [Vector3], color: String = "#e2b45c", width: Double = 0.025) {
+    func addStroke(points: [Vector3], color: String? = nil, width: Double = 0.025) {
         guard points.count >= 2 else { return }
         let stroke = DrawingStrokeDTO(
             strokeId: "stroke_\(UUID().uuidString.prefix(8))",
             sceneId: sceneId,
             actorId: APIConfig.actorId,
-            color: color,
+            color: color ?? drawColor,
             width: width,
             points: points,
             plane: .free,
             createdAt: ISO8601DateFormatter().string(from: Date())
         )
+        // Optimistic local append first — ink already on screen from the draft entity.
         strokes.append(stroke)
+        // Fire-and-forget WS (URLSession callback); never await network on the gesture path.
         realtime.sendStroke(stroke)
-        statusMessage = "AR sketch synced · \(strokes.count) strokes"
+        statusMessage = "Sketch synced · \(strokes.count)"
     }
 
     func clearOwnStrokes() {
         strokes.removeAll { $0.actorId == APIConfig.actorId }
         realtime.sendClear(scope: "own")
         statusMessage = "Cleared your strokes"
+    }
+
+    func clearAllStrokes() {
+        strokes = []
+        realtime.sendClear(scope: "all")
+        statusMessage = "Cleared all strokes"
     }
 
     func updateSceneId(_ next: String) {
@@ -92,6 +112,7 @@ final class SceneSyncStore {
         hasRoomMap = false
         selectedObjectId = nil
         strokes = []
+        lastLayout = nil
         realtime.disconnect()
         statusMessage = "Scene id set — scan or load"
         realtime.connect(sceneId: sceneId)
@@ -111,6 +132,15 @@ final class SceneSyncStore {
         } catch {
             lastError = error.localizedDescription
             statusMessage = "Fetch failed"
+        }
+    }
+
+    func loadCatalogIfNeeded(force: Bool = false) async {
+        if !force, !catalog.isEmpty { return }
+        do {
+            catalog = try await APIClient.shared.fetchCatalog()
+        } catch {
+            lastError = error.localizedDescription
         }
     }
 
@@ -165,28 +195,26 @@ final class SceneSyncStore {
             lastError = "Select an object first"
             return
         }
-        guard object.type != "wall", object.movable != false else {
-            lastError = "Walls stay fixed"
-            return
-        }
         let next = Vector3(
             object.transform.position.x + dx,
             object.transform.position.y,
             object.transform.position.z + dz
         )
-        let op = SceneOperationDTO(
-            type: .moveObject,
-            objectId: object.id,
-            targetPosition: next,
-            targetRotation: nil,
-            assetId: nil,
-            productId: nil,
-            objectType: nil,
-            dimensions: nil,
-            movable: nil,
-            source: nil
-        )
-        await pushOps([op])
+        await moveObject(id: object.id, to: next)
+    }
+
+    /// Absolute MOVE_OBJECT (floor-plane drag in Live AR / web twin).
+    func moveObject(id: String, to position: Vector3) async {
+        guard let scene else { return }
+        guard let object = scene.objects.first(where: { $0.id == id }) else {
+            lastError = "Object not found"
+            return
+        }
+        guard object.type != "wall", object.movable != false else {
+            lastError = "Walls stay fixed"
+            return
+        }
+        await pushOps([.move(objectId: object.id, to: position)])
     }
 
     func removeSelected() async {
@@ -198,20 +226,35 @@ final class SceneSyncStore {
             lastError = "Walls stay fixed"
             return
         }
-        let op = SceneOperationDTO(
-            type: .deleteObject,
-            objectId: object.id,
-            targetPosition: nil,
-            targetRotation: nil,
-            assetId: nil,
-            productId: nil,
-            objectType: nil,
-            dimensions: nil,
-            movable: nil,
-            source: nil
-        )
-        await pushOps([op])
+        await pushOps([.delete(objectId: object.id)])
         selectedObjectId = nil
+    }
+
+    /// Place a catalog product via ADD_OBJECT at `position` (or placement hint / room default).
+    func placeCatalogItem(_ item: CatalogItemDTO, at position: Vector3? = nil) async {
+        guard let scene else {
+            lastError = "No scene loaded"
+            return
+        }
+        let id = "ar_\(item.productId)_\(UUID().uuidString.prefix(5))"
+        let height = item.dimensions?.height ?? 0.5
+        let y = height * 0.5
+        let resolved: Vector3
+        if let position {
+            resolved = Vector3(position.x, y, position.z)
+        } else if let hint = placementHint {
+            resolved = Vector3(hint.x, y, hint.z)
+        } else {
+            resolved = Vector3(
+                0.35,
+                y,
+                -min(1.1, scene.bounds.length * 0.28)
+            )
+        }
+        let op = SceneOperationDTO.add(from: item, objectId: id, position: resolved)
+        await pushOps([op])
+        selectedObjectId = id
+        statusMessage = "Placed \(item.name)"
     }
 
     /// Call hybrid `/ai/layout` then apply returned ops into the shared scene (AR / web twin).
@@ -237,6 +280,7 @@ final class SceneSyncStore {
                     budget: budget
                 )
             )
+            lastLayout = layout
             statusMessage = "AI \(layout.plannerMode ?? "rules"): \(layout.scenario) · \(layout.operations.count) ops"
         } catch {
             lastError = error.localizedDescription
@@ -302,7 +346,6 @@ final class SceneSyncStore {
                 lookDirection: Vector3(-0.4, 0, 0.9)
             )
         ]
-        // Free-space sketch placeholder (not wall-locked).
         if strokes.isEmpty {
             strokes = [
                 DrawingStrokeDTO(

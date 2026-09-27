@@ -23,6 +23,7 @@ export function CatalogPanel() {
       <ul className="catalog-list">
         {catalog.map((item) => {
           const isBestValue = bestValueIds.has(item.productId);
+          const url = item.productUrl || item.websiteUrl || null;
           return (
             <li
               key={item.productId}
@@ -47,14 +48,26 @@ export function CatalogPanel() {
                   {inScene.has(item.productId) ? ' · in scene' : ''}
                 </p>
               </div>
-              <button
-                type="button"
-                className="btn compact"
-                disabled={isBusy || !productMap.has(item.productId)}
-                onClick={() => void addCatalogItem(item.productId)}
-              >
-                Add
-              </button>
+              <div className="shop-rec-actions">
+                {url && item.purchasable !== false && !item.virtualOnly ? (
+                  <a
+                    className="btn compact ghost"
+                    href={url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    Open website
+                  </a>
+                ) : null}
+                <button
+                  type="button"
+                  className="btn compact"
+                  disabled={isBusy || !productMap.has(item.productId)}
+                  onClick={() => void addCatalogItem(item.productId)}
+                >
+                  Add
+                </button>
+              </div>
             </li>
           );
         })}

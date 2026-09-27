@@ -9,6 +9,7 @@ struct SceneRealityView: UIViewRepresentable {
     var strokes: [DrawingStrokeDTO] = []
     var ghosts: [PresenceUserDTO] = []
     var drawMode: Bool = false
+    var drawColor: String = "#e2b45c"
     var onSelect: ((String?) -> Void)?
     var onStrokeComplete: (([Vector3]) -> Void)?
 
@@ -19,7 +20,6 @@ struct SceneRealityView: UIViewRepresentable {
         if let root = context.coordinator.root {
             view.scene.addAnchor(root)
         }
-        // Non-AR mode: viewpoint comes from a PerspectiveCamera entity (cameraTransform is get-only).
         let camera = PerspectiveCamera()
         camera.camera = PerspectiveCameraComponent(near: 0.01, far: 100, fieldOfViewInDegrees: 60)
         let cameraAnchor = AnchorEntity(world: .zero)
@@ -35,22 +35,23 @@ struct SceneRealityView: UIViewRepresentable {
         context.coordinator.onSelect = onSelect
         context.coordinator.onStrokeComplete = onStrokeComplete
         context.coordinator.drawMode = drawMode
+        context.coordinator.drawColor = drawColor
         rebuild(coordinator: context.coordinator)
         return view
     }
 
     func updateUIView(_ uiView: ARView, context: Context) {
-        context.coordinator.onSelect = onSelect
-        context.coordinator.onStrokeComplete = onStrokeComplete
-        context.coordinator.drawMode = drawMode
-        rebuild(coordinator: context.coordinator)
+        let c = context.coordinator
+        c.onSelect = onSelect
+        c.onStrokeComplete = onStrokeComplete
+        c.drawMode = drawMode
+        c.drawColor = drawColor
+        if c.isDrawing { return }
+        rebuild(coordinator: c)
     }
 
-    func makeCoordinator() -> Coordinator {
-        Coordinator()
-    }
+    func makeCoordinator() -> Coordinator { Coordinator() }
 
-    /// Map gestures invoke `@MainActor` SceneSyncStore closures — keep Coordinator isolated.
     @MainActor
     final class Coordinator: NSObject {
         var root: AnchorEntity?
@@ -59,16 +60,21 @@ struct SceneRealityView: UIViewRepresentable {
         var onSelect: ((String?) -> Void)?
         var onStrokeComplete: (([Vector3]) -> Void)?
         var drawMode = false
+        var drawColor = "#e2b45c"
+        var isDrawing = false
         var renderedVersion: Int = -1
         var renderedObjectCount: Int = -1
         var renderedSelection: String? = "___"
-        var renderedStrokeCount: Int = -1
+        var renderedStrokeIds: [String] = []
         var renderedGhostCount: Int = -1
         var sceneSnapshot: SceneDTO?
         var strokesSnapshot: [DrawingStrokeDTO] = []
         var ghostsSnapshot: [PresenceUserDTO] = []
         var selectedId: String?
         private var draftPoints: [Vector3] = []
+        var draftEntity: Entity?
+        private var lastDraftSIMD: SIMD3<Float>?
+        private var draftMaterial = SimpleMaterial(color: .systemYellow, isMetallic: false)
 
         @objc func handleTap(_ gesture: UITapGestureRecognizer) {
             guard !drawMode, let view = hostView else { return }
@@ -86,25 +92,48 @@ struct SceneRealityView: UIViewRepresentable {
             let loc = gesture.location(in: view)
             switch gesture.state {
             case .began:
+                isDrawing = true
                 draftPoints = []
-                if let p = mapSpacePoint(at: loc, in: view) { draftPoints = [p] }
+                lastDraftSIMD = nil
+                draftEntity?.removeFromParent()
+                let draft = Entity()
+                draft.name = "draft_stroke"
+                draftEntity = draft
+                root?.addChild(draft)
+                let ui = UIColor(hex: drawColor) ?? .systemYellow
+                draftMaterial = SimpleMaterial(color: ui.withAlphaComponent(0.95), isMetallic: false)
+                if let p = mapSpacePoint(at: loc, in: view) {
+                    draftPoints = [p]
+                    lastDraftSIMD = Coordinates.toSIMD(p)
+                }
             case .changed:
                 guard let p = mapSpacePoint(at: loc, in: view) else { return }
-                if let last = draftPoints.last {
-                    let dx = p.x - last.x, dy = p.y - last.y, dz = p.z - last.z
+                let simd = Coordinates.toSIMD(p)
+                if let last = lastDraftSIMD {
+                    let dx = simd.x - last.x, dy = simd.y - last.y, dz = simd.z - last.z
                     if dx * dx + dy * dy + dz * dz < 0.0009 { return }
+                    draftEntity?.addChild(
+                        ARStrokeMesh.segment(
+                            from: last, to: simd, radius: 0.011,
+                            material: draftMaterial, name: "draft_seg"
+                        )
+                    )
                 }
                 draftPoints.append(p)
+                lastDraftSIMD = simd
             case .ended, .cancelled:
                 let pts = draftPoints
+                draftEntity?.name = "stroke_pending"
+                draftEntity = nil
                 draftPoints = []
+                lastDraftSIMD = nil
+                isDrawing = false
                 if pts.count >= 2 { onStrokeComplete?(pts) }
             default:
                 break
             }
         }
 
-        /// Ray from orbit camera through screen into free space (~1.4 m along look).
         private func mapSpacePoint(at screen: CGPoint, in view: ARView) -> Vector3? {
             let cam = view.cameraTransform
             let camPos = cam.translation
@@ -112,14 +141,12 @@ struct SceneRealityView: UIViewRepresentable {
             guard size.width > 1, size.height > 1 else { return nil }
             let ndcX = Float((2 * screen.x / size.width) - 1)
             let ndcY = Float(1 - (2 * screen.y / size.height))
-            // Approximate look from camera rotation (local -Z).
             let q = cam.rotation
             let forward = simd_act(q, SIMD3<Float>(0, 0, -1))
             let right = simd_act(q, SIMD3<Float>(1, 0, 0))
             let up = simd_act(q, SIMD3<Float>(0, 1, 0))
-            let depth: Float = 2.2
             let dir = normalize(forward + right * ndcX * 0.55 + up * ndcY * 0.55)
-            let world = camPos + dir * depth
+            let world = camPos + dir * 2.2
             return Vector3(Double(world.x), Double(world.y), Double(world.z))
         }
     }
@@ -129,26 +156,29 @@ struct SceneRealityView: UIViewRepresentable {
         guard let root = coordinator.root else { return }
         let version = scene?.version ?? -1
         let count = scene?.objects.count ?? -1
-        let strokeCount = strokes.count
+        let strokeIds = strokes.map(\.strokeId)
         let ghostCount = ghosts.count
         if version == coordinator.renderedVersion,
            count == coordinator.renderedObjectCount,
            selectedObjectId == coordinator.renderedSelection,
-           strokeCount == coordinator.renderedStrokeCount,
+           strokeIds == coordinator.renderedStrokeIds,
            ghostCount == coordinator.renderedGhostCount {
             return
         }
         coordinator.renderedVersion = version
         coordinator.renderedObjectCount = count
         coordinator.renderedSelection = selectedObjectId
-        coordinator.renderedStrokeCount = strokeCount
+        coordinator.renderedStrokeIds = strokeIds
         coordinator.renderedGhostCount = ghostCount
         coordinator.sceneSnapshot = scene
         coordinator.strokesSnapshot = strokes
         coordinator.ghostsSnapshot = ghosts
         coordinator.selectedId = selectedObjectId
 
-        root.children.forEach { $0.removeFromParent() }
+        let keep: Set<String> = ["draft_stroke", "stroke_pending"]
+        root.children.forEach { child in
+            if !keep.contains(child.name) { child.removeFromParent() }
+        }
 
         guard let scene else {
             let placeholder = ModelEntity(
@@ -161,20 +191,22 @@ struct SceneRealityView: UIViewRepresentable {
         }
 
         addFloorGrid(to: root, bounds: scene.bounds)
-
         for object in scene.objects {
-            root.addChild(makeFurnitureProxy(for: object, selected: object.id == selectedObjectId))
+            root.addChild(FurnitureMeshBuilder.makeEntity(for: object, selected: object.id == selectedObjectId))
         }
-
         for stroke in strokes {
             root.addChild(ARStrokeMesh.makeEntity(stroke))
         }
-
+        if let pending = root.children.first(where: { $0.name == "stroke_pending" }) {
+            pending.removeFromParent()
+        }
         for ghost in GhostAvatarAnchors.remoteGhosts(from: ghosts, localUserId: APIConfig.actorId) {
             root.addChild(makeGhostEntity(ghost))
         }
+        if let draft = coordinator.draftEntity, draft.parent == nil {
+            root.addChild(draft)
+        }
 
-        // Orbit the PerspectiveCamera over the room (do not assign ARView.cameraTransform).
         if let camera = coordinator.camera {
             var cam = Transform()
             cam.translation = SIMD3(
@@ -225,135 +257,6 @@ struct SceneRealityView: UIViewRepresentable {
         }
     }
 
-    private func makeFurnitureProxy(for object: SceneObjectDTO, selected: Bool) -> Entity {
-        let w = Float(object.dimensions?.width ?? 0.5)
-        let h = Float(object.dimensions?.height ?? 0.5)
-        let d = Float(object.dimensions?.depth ?? 0.5)
-        let parent = Entity()
-        parent.name = object.id
-        parent.position = Coordinates.toSIMD(object.transform.position)
-        parent.orientation = Coordinates.toSIMDQuat(object.transform.rotation)
-
-        let baseColor = furnitureColor(for: object)
-        let color = selected
-            ? baseColor.withAlphaComponent(1).blended(with: .systemYellow) ?? baseColor
-            : baseColor
-        let mat = SimpleMaterial(color: color, isMetallic: object.type == "wall")
-
-        switch object.type {
-        case "wall":
-            let wall = ModelEntity(
-                mesh: .generateBox(width: w, height: h, depth: max(d, 0.06)),
-                materials: [SimpleMaterial(color: UIColor(white: 0.55, alpha: 0.85), isMetallic: false)]
-            )
-            wall.name = object.id
-            parent.addChild(wall)
-        case "sofa":
-            let seat = ModelEntity(
-                mesh: .generateBox(width: w, height: h * 0.45, depth: d),
-                materials: [mat]
-            )
-            seat.position.y = -h * 0.15
-            seat.name = object.id
-            let back = ModelEntity(
-                mesh: .generateBox(width: w, height: h * 0.55, depth: d * 0.22),
-                materials: [mat]
-            )
-            back.position = SIMD3(0, h * 0.05, -d * 0.35)
-            back.name = object.id
-            parent.addChild(seat)
-            parent.addChild(back)
-        case "table":
-            let top = ModelEntity(
-                mesh: .generateBox(width: w, height: max(h * 0.08, 0.04), depth: d),
-                materials: [mat]
-            )
-            top.position.y = h * 0.42
-            top.name = object.id
-            parent.addChild(top)
-            let legSize: Float = 0.05
-            let insetX = w * 0.4
-            let insetZ = d * 0.4
-            for (sx, sz) in [(-1, -1), (-1, 1), (1, -1), (1, 1)] as [(Float, Float)] {
-                let leg = ModelEntity(
-                    mesh: .generateBox(width: legSize, height: h * 0.85, depth: legSize),
-                    materials: [mat]
-                )
-                leg.position = SIMD3(sx * insetX, 0, sz * insetZ)
-                leg.name = object.id
-                parent.addChild(leg)
-            }
-        case "chair":
-            let seat = ModelEntity(
-                mesh: .generateBox(width: w, height: h * 0.12, depth: d),
-                materials: [mat]
-            )
-            seat.position.y = -h * 0.15
-            seat.name = object.id
-            let back = ModelEntity(
-                mesh: .generateBox(width: w, height: h * 0.55, depth: d * 0.12),
-                materials: [mat]
-            )
-            back.position = SIMD3(0, h * 0.15, -d * 0.4)
-            back.name = object.id
-            parent.addChild(seat)
-            parent.addChild(back)
-        case "floor_lamp", "lamp":
-            // MeshResource.generateCylinder is iOS 18+; use boxes for iOS 17 deployment.
-            let pole = ModelEntity(
-                mesh: .generateBox(width: 0.06, height: h * 0.85, depth: 0.06),
-                materials: [mat]
-            )
-            pole.name = object.id
-            let shadeR = max(w, d) * 0.35
-            let shade = ModelEntity(
-                mesh: .generateBox(width: shadeR * 2, height: h * 0.2, depth: shadeR * 2),
-                materials: [SimpleMaterial(color: .systemYellow, isMetallic: false)]
-            )
-            shade.position.y = h * 0.4
-            shade.name = object.id
-            parent.addChild(pole)
-            parent.addChild(shade)
-        default:
-            let box = ModelEntity(
-                mesh: .generateBox(width: w, height: h, depth: d),
-                materials: [mat]
-            )
-            box.name = object.id
-            parent.addChild(box)
-        }
-
-        if selected {
-            let ring = ModelEntity(
-                mesh: .generateBox(width: w * 1.12, height: 0.02, depth: d * 1.12),
-                materials: [SimpleMaterial(color: .systemYellow.withAlphaComponent(0.7), isMetallic: false)]
-            )
-            ring.position.y = -h * 0.48
-            ring.name = object.id
-            parent.addChild(ring)
-        }
-
-        return parent
-    }
-
-    private func furnitureColor(for object: SceneObjectDTO) -> UIColor {
-        if object.source == "existing" {
-            switch object.type {
-            case "sofa": return UIColor(red: 0.35, green: 0.42, blue: 0.48, alpha: 1)
-            case "table": return UIColor(red: 0.45, green: 0.32, blue: 0.22, alpha: 1)
-            case "chair": return UIColor(red: 0.5, green: 0.38, blue: 0.28, alpha: 1)
-            default: return UIColor(white: 0.42, alpha: 1)
-            }
-        }
-        switch object.type {
-        case "sofa": return .systemTeal
-        case "table": return .systemBrown
-        case "chair": return .systemOrange
-        case "floor_lamp", "lamp": return .systemYellow
-        default: return .systemIndigo
-        }
-    }
-
     private func makeGhostEntity(_ user: PresenceUserDTO) -> Entity {
         let parent = Entity()
         parent.name = "ghost_\(user.userId)"
@@ -362,7 +265,6 @@ struct SceneRealityView: UIViewRepresentable {
         }
         let tint = UIColor(hex: user.color ?? "#6eb4c8") ?? .systemTeal
         let opacity: CGFloat = user.voiceSpeaking == true ? 0.55 : 0.35
-        // Capsule approx without generateCylinder (iOS 18+).
         let body = ModelEntity(
             mesh: .generateBox(width: 0.32, height: 0.7, depth: 0.32),
             materials: [SimpleMaterial(color: tint.withAlphaComponent(opacity), isMetallic: false)]
@@ -380,32 +282,6 @@ struct SceneRealityView: UIViewRepresentable {
     }
 }
 
-private extension UIColor {
-    func blended(with other: UIColor) -> UIColor? {
-        var r1: CGFloat = 0, g1: CGFloat = 0, b1: CGFloat = 0, a1: CGFloat = 0
-        var r2: CGFloat = 0, g2: CGFloat = 0, b2: CGFloat = 0, a2: CGFloat = 0
-        guard getRed(&r1, green: &g1, blue: &b1, alpha: &a1),
-              other.getRed(&r2, green: &g2, blue: &b2, alpha: &a2) else { return nil }
-        return UIColor(
-            red: (r1 + r2) / 2,
-            green: (g1 + g2) / 2,
-            blue: (b1 + b2) / 2,
-            alpha: max(a1, a2)
-        )
-    }
-
-    convenience init?(hex: String) {
-        var s = hex.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        if s.hasPrefix("#") { s.removeFirst() }
-        guard s.count == 6, let value = UInt64(s, radix: 16) else { return nil }
-        let r = CGFloat((value & 0xFF0000) >> 16) / 255
-        let g = CGFloat((value & 0x00FF00) >> 8) / 255
-        let b = CGFloat(value & 0x0000FF) / 255
-        self.init(red: r, green: g, blue: b, alpha: 1)
-    }
-}
-
-/// Legacy entry kept for project references; primary UI is ARRoomView (live camera AR).
 struct SceneViewerView: View {
     var body: some View {
         Text("Open Live AR from the scan-first flow.")
@@ -413,7 +289,19 @@ struct SceneViewerView: View {
     }
 }
 
-/// Primary post-scan surface: live camera AR (device) or map twin (Simulator) + draw / Plan / Invite.
+// MARK: - Live AR HUD
+
+private enum DrawPalette {
+    static let colors: [(hex: String, label: String)] = [
+        ("#e2b45c", "Gold"),
+        ("#6ec8e8", "Cyan"),
+        ("#f07178", "Coral"),
+        ("#c3e88d", "Lime"),
+        ("#ffffff", "White")
+    ]
+}
+
+/// Primary post-scan surface: live camera AR (device) or map twin (Simulator).
 struct ARRoomView: View {
     @Environment(SceneSyncStore.self) private var store
     var onRescan: () -> Void
@@ -422,6 +310,7 @@ struct ARRoomView: View {
     var onSettings: () -> Void
 
     @State private var drawMode = false
+    @State private var showCatalog = false
     #if targetEnvironment(simulator)
     @State private var mapOnly = true
     #else
@@ -429,241 +318,341 @@ struct ARRoomView: View {
     #endif
 
     var body: some View {
-        NavigationStack {
-            ZStack {
-                if store.scene == nil {
-                    ContentUnavailableView {
-                        Label("No room yet", systemImage: "camera.viewfinder")
-                    } description: {
-                        Text("Scan a room first, then enter live AR over the real space.")
-                    } actions: {
-                        Button("Back to scan") { onRescan() }
-                    }
-                } else {
-                    #if targetEnvironment(simulator)
-                    SceneRealityView(
-                        scene: store.scene,
-                        selectedObjectId: store.selectedObjectId,
-                        strokes: store.strokes,
-                        ghosts: store.presenceGhosts,
-                        drawMode: drawMode,
-                        onSelect: { store.selectedObjectId = $0 },
-                        onStrokeComplete: { store.addStroke(points: $0) }
-                    )
-                    .ignoresSafeArea(edges: .bottom)
-                    #else
-                    if mapOnly {
-                        SceneRealityView(
-                            scene: store.scene,
-                            selectedObjectId: store.selectedObjectId,
-                            strokes: store.strokes,
-                            ghosts: store.presenceGhosts,
-                            drawMode: drawMode,
-                            onSelect: { store.selectedObjectId = $0 },
-                            onStrokeComplete: { store.addStroke(points: $0) }
-                        )
-                        .ignoresSafeArea(edges: .bottom)
-                    } else {
-                        ARViewContainer(
-                            scene: store.scene,
-                            selectedObjectId: store.selectedObjectId,
-                            strokes: store.strokes,
-                            ghosts: store.presenceGhosts,
-                            drawMode: drawMode,
-                            onSelect: { store.selectedObjectId = $0 },
-                            onStrokeComplete: { store.addStroke(points: $0) }
-                        )
-                        .ignoresSafeArea(edges: .bottom)
-                    }
-                    #endif
-                }
+        ZStack {
+            Color.black.ignoresSafeArea()
 
-                VStack {
-                    Spacer()
-                    controlChrome
-                }
+            if store.scene == nil {
+                emptyState
+            } else {
+                arCanvas
+                    .ignoresSafeArea()
             }
-            .navigationTitle(mapOnly ? "Room map" : "Live AR")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("Scan") { onRescan() }
+
+            VStack(spacing: 0) {
+                topBar
+                Spacer()
+                if drawMode {
+                    drawToolbar
+                } else if let obj = store.selectedObject {
+                    selectionCard(obj)
                 }
-                ToolbarItemGroup(placement: .topBarTrailing) {
-                    #if !targetEnvironment(simulator)
-                    Button(mapOnly ? "Camera AR" : "Map") {
-                        mapOnly.toggle()
-                    }
-                    #endif
-                    Button {
-                        Task { await store.refresh(markAsRoomMap: true) }
-                    } label: {
-                        if store.isBusy {
-                            ProgressView()
-                        } else {
-                            Image(systemName: "arrow.clockwise")
-                        }
-                    }
-                    Button { onSettings() } label: {
-                        Image(systemName: "gearshape")
-                    }
-                }
+                bottomBar
             }
-            .task {
-                store.seedGhostStubsIfNeeded()
-                store.connectRealtime()
-                if store.scene == nil {
-                    await store.refresh(markAsRoomMap: true)
-                }
+        }
+        .preferredColorScheme(.dark)
+        .sheet(isPresented: $showCatalog) {
+            CatalogPickerSheet()
+        }
+        .task {
+            store.seedGhostStubsIfNeeded()
+            store.connectRealtime()
+            await store.loadCatalogIfNeeded()
+            if store.scene == nil {
+                await store.refresh(markAsRoomMap: true)
             }
-            .onDisappear {
-                store.disconnectRealtime()
-            }
+        }
+        .onDisappear {
+            store.disconnectRealtime()
         }
     }
 
-    private var controlChrome: some View {
-        VStack(spacing: 10) {
-            if let err = store.lastError {
-                Text(err)
-                    .font(.caption2)
-                    .foregroundStyle(.red)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+    // MARK: Canvas
+
+    @ViewBuilder
+    private var arCanvas: some View {
+        #if targetEnvironment(simulator)
+        SceneRealityView(
+            scene: store.scene,
+            selectedObjectId: store.selectedObjectId,
+            strokes: store.strokes,
+            ghosts: store.presenceGhosts,
+            drawMode: drawMode,
+            drawColor: store.drawColor,
+            onSelect: { store.selectedObjectId = $0 },
+            onStrokeComplete: { store.addStroke(points: $0) }
+        )
+        #else
+        if mapOnly {
+            SceneRealityView(
+                scene: store.scene,
+                selectedObjectId: store.selectedObjectId,
+                strokes: store.strokes,
+                ghosts: store.presenceGhosts,
+                drawMode: drawMode,
+                drawColor: store.drawColor,
+                onSelect: { store.selectedObjectId = $0 },
+                onStrokeComplete: { store.addStroke(points: $0) }
+            )
+        } else {
+            ARViewContainer(
+                scene: store.scene,
+                selectedObjectId: store.selectedObjectId,
+                strokes: store.strokes,
+                ghosts: store.presenceGhosts,
+                drawMode: drawMode,
+                drawColor: store.drawColor,
+                onSelect: { store.selectedObjectId = $0 },
+                onStrokeComplete: { store.addStroke(points: $0) },
+                onMoveEnd: { id, pos in
+                    Task { await store.moveObject(id: id, to: pos) }
+                },
+                onPlacementHint: { store.placementHint = $0 }
+            )
+        }
+        #endif
+    }
+
+    private var emptyState: some View {
+        ContentUnavailableView {
+            Label("No room yet", systemImage: "camera.viewfinder")
+        } description: {
+            Text("Scan a room first, then enter live AR over the real space.")
+        } actions: {
+            Button("Back to scan") { onRescan() }
+                .buttonStyle(.borderedProminent)
+        }
+    }
+
+    // MARK: Top chrome
+
+    private var topBar: some View {
+        HStack(spacing: 10) {
+            hudIconButton("chevron.left", label: "Scan") { onRescan() }
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(mapOnly ? "Room map" : "Live AR")
+                    .font(.headline.weight(.semibold))
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(store.wsConnected ? Color.green : Color.orange.opacity(0.8))
+                        .frame(width: 6, height: 6)
+                    Text(store.wsConnected ? "Live" : "Offline")
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(.secondary)
+                    if let scene = store.scene {
+                        Text("· v\(scene.version)")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
+                }
             }
 
-            if drawMode {
-                Text("Drag anywhere to sketch in AR space — strokes sync to peers.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            } else if let obj = store.selectedObject {
-                selectionBar(obj)
+            Spacer()
+
+            #if !targetEnvironment(simulator)
+            hudIconButton(mapOnly ? "camera.viewfinder" : "square.3.layers.3d") {
+                mapOnly.toggle()
             }
+            #endif
+            hudIconButton("arrow.clockwise") {
+                Task { await store.refresh(markAsRoomMap: true) }
+            }
+            hudIconButton("gearshape") { onSettings() }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(.ultraThinMaterial.opacity(0.92))
+    }
 
-            Text(store.statusMessage)
-                .font(.caption)
-                .frame(maxWidth: .infinity)
+    // MARK: Draw toolbar
 
-            if let scene = store.scene {
-                Text(
-                    "v\(scene.version) · \(scene.objects.count) objects · \(store.strokes.count) strokes · "
-                        + String(
-                            format: "%.1f×%.1f×%.1f m",
-                            scene.bounds.width,
-                            scene.bounds.length,
-                            scene.bounds.height
-                        )
-                )
+    private var drawToolbar: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Sketch in space")
+                .font(.subheadline.weight(.semibold))
+            Text("Ink follows your finger · syncs when you lift.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
-            }
 
             HStack(spacing: 10) {
-                Button {
-                    drawMode.toggle()
-                    if drawMode { store.selectedObjectId = nil }
-                } label: {
-                    Label(drawMode ? "Exit draw" : "Draw in space", systemImage: "pencil.tip")
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(drawMode ? .orange : .accentColor)
-                .disabled(store.scene == nil)
-
-                if drawMode {
-                    Button("Clear mine") { store.clearOwnStrokes() }
-                        .buttonStyle(.bordered)
-                }
-
-                Button { onPlan() } label: {
-                    Label("Plan", systemImage: "wand.and.stars")
-                }
-                .buttonStyle(.bordered)
-                .disabled(store.scene == nil || store.isBusy || drawMode)
-
-                Button { onInvite() } label: {
-                    Label("Invite", systemImage: "person.badge.plus")
-                }
-                .buttonStyle(.bordered)
-                .disabled(store.scene == nil || store.isBusy)
-
-                #if !targetEnvironment(simulator)
-                if !drawMode {
+                ForEach(DrawPalette.colors, id: \.hex) { swatch in
                     Button {
-                        Task { await placeCatalogChair() }
+                        store.drawColor = swatch.hex
                     } label: {
-                        Label("Place", systemImage: "plus.square.on.square")
+                        Circle()
+                            .fill(Color(uiColor: UIColor(hex: swatch.hex) ?? .yellow))
+                            .frame(width: 28, height: 28)
+                            .overlay {
+                                Circle()
+                                    .strokeBorder(
+                                        store.drawColor == swatch.hex ? Color.white : Color.clear,
+                                        lineWidth: 2.5
+                                    )
+                            }
                     }
-                    .buttonStyle(.bordered)
-                    .disabled(store.scene == nil || store.isBusy)
-                }
-                #endif
-            }
-        }
-        .padding()
-        .background(.ultraThinMaterial)
-    }
-
-    private func selectionBar(_ obj: SceneObjectDTO) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text("\(obj.type.replacingOccurrences(of: "_", with: " "))")
-                    .font(.subheadline.weight(.semibold))
-                if obj.source == "existing" {
-                    Text("room")
-                        .font(.caption2)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(.orange.opacity(0.25), in: Capsule())
+                    .accessibilityLabel(swatch.label)
                 }
                 Spacer()
-                Button("Deselect") { store.selectedObjectId = nil }
-                    .font(.caption)
+                Button("Clear mine") { store.clearOwnStrokes() }
+                    .font(.caption.weight(.medium))
+                Button("Clear all") { store.clearAllStrokes() }
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.orange)
+            }
+        }
+        .padding(14)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .padding(.horizontal, 12)
+        .padding(.bottom, 8)
+    }
+
+    // MARK: Selection
+
+    private func selectionCard(_ obj: SceneObjectDTO) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text(obj.type.replacingOccurrences(of: "_", with: " ").capitalized)
+                    .font(.subheadline.weight(.semibold))
+                if obj.source == "existing" {
+                    Text("SCANNED")
+                        .font(.caption2.weight(.bold))
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(.orange.opacity(0.3), in: Capsule())
+                }
+                Spacer()
+                Button("Done") { store.selectedObjectId = nil }
+                    .font(.caption.weight(.semibold))
             }
 
             if obj.type != "wall", obj.movable != false {
+                Text("Drag on the floor to move · or nudge")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
                 HStack(spacing: 8) {
-                    Button("←") { Task { await store.moveSelected(dx: -0.25, dz: 0) } }
-                        .buttonStyle(.bordered)
-                    Button("→") { Task { await store.moveSelected(dx: 0.25, dz: 0) } }
-                        .buttonStyle(.bordered)
-                    Button("↑") { Task { await store.moveSelected(dx: 0, dz: -0.25) } }
-                        .buttonStyle(.bordered)
-                    Button("↓") { Task { await store.moveSelected(dx: 0, dz: 0.25) } }
-                        .buttonStyle(.bordered)
+                    nudge("arrow.left") { Task { await store.moveSelected(dx: -0.25, dz: 0) } }
+                    nudge("arrow.right") { Task { await store.moveSelected(dx: 0.25, dz: 0) } }
+                    nudge("arrow.up") { Task { await store.moveSelected(dx: 0, dz: -0.25) } }
+                    nudge("arrow.down") { Task { await store.moveSelected(dx: 0, dz: 0.25) } }
                     Spacer()
-                    Button("Remove", role: .destructive) {
+                    Button(role: .destructive) {
                         Task { await store.removeSelected() }
+                    } label: {
+                        Label("Remove", systemImage: "trash")
+                            .font(.caption.weight(.semibold))
                     }
-                    .buttonStyle(.bordered)
+                    .disabled(store.isBusy)
                 }
-                .disabled(store.isBusy)
             } else {
                 Text("Walls stay fixed in the shared scene.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
         }
-        .padding(10)
-        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
+        .padding(14)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .padding(.horizontal, 12)
+        .padding(.bottom, 8)
     }
 
-    private func placeCatalogChair() async {
-        guard let scene = store.scene else { return }
-        let id = "ar_anchor_\(UUID().uuidString.prefix(6))"
-        let position = Vector3(0.4, 0.43, -min(0.9, scene.bounds.length * 0.25))
-        let op = SceneOperationDTO(
-            type: .addObject,
-            objectId: id,
-            targetPosition: position,
-            targetRotation: .identity,
-            assetId: "asset_chair_fold_01",
-            productId: "chair_fold_01",
-            objectType: "chair",
-            dimensions: DimensionsDTO(width: 0.48, height: 0.86, depth: 0.52),
-            movable: true,
-            source: "catalog"
-        )
-        await store.pushOps([op])
-        store.selectedObjectId = id
+    // MARK: Bottom bar
+
+    private var bottomBar: some View {
+        VStack(spacing: 8) {
+            if let err = store.lastError {
+                Text(err)
+                    .font(.caption2)
+                    .foregroundStyle(.red)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                Text(store.statusMessage)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .lineLimit(1)
+            }
+
+            HStack(spacing: 8) {
+                Button {
+                    withAnimation(.easeOut(duration: 0.15)) {
+                        drawMode.toggle()
+                        if drawMode { store.selectedObjectId = nil }
+                    }
+                } label: {
+                    Image(systemName: drawMode ? "xmark" : "pencil.tip")
+                        .frame(width: 22, height: 22)
+                }
+                .buttonStyle(ARToolButtonStyle(prominent: drawMode, tint: .orange))
+
+                if !drawMode {
+                    Button { showCatalog = true } label: {
+                        Image(systemName: "plus")
+                            .frame(width: 22, height: 22)
+                    }
+                    .buttonStyle(ARToolButtonStyle())
+                    .disabled(store.scene == nil || store.isBusy)
+
+                    Button { onPlan() } label: {
+                        Image(systemName: "wand.and.stars")
+                            .frame(width: 22, height: 22)
+                    }
+                    .buttonStyle(ARToolButtonStyle())
+                    .disabled(store.scene == nil || store.isBusy)
+
+                    Button { onInvite() } label: {
+                        Image(systemName: "person.badge.plus")
+                            .frame(width: 22, height: 22)
+                    }
+                    .buttonStyle(ARToolButtonStyle())
+                    .disabled(store.scene == nil || store.isBusy)
+                }
+
+                Spacer(minLength: 0)
+
+                if let scene = store.scene {
+                    Text("\(scene.objects.count) · \(store.strokes.count)")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.tertiary)
+                }
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.top, 10)
+        .padding(.bottom, 12)
+        .background(.ultraThinMaterial.opacity(0.95))
+    }
+
+    // MARK: Helpers
+
+    private func hudIconButton(_ systemName: String, label: String? = nil, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            if let label {
+                Label(label, systemImage: systemName)
+                    .labelStyle(.iconOnly)
+                    .font(.body.weight(.medium))
+            } else {
+                Image(systemName: systemName)
+                    .font(.body.weight(.medium))
+            }
+        }
+        .frame(width: 36, height: 36)
+        .background(.thinMaterial, in: Circle())
+    }
+
+    private func nudge(_ systemName: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.caption.weight(.bold))
+                .frame(width: 34, height: 34)
+        }
+        .buttonStyle(.bordered)
+        .disabled(store.isBusy)
+    }
+}
+
+private struct ARToolButtonStyle: ButtonStyle {
+    var prominent = false
+    var tint: Color = .cyan
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.body.weight(.semibold))
+            .foregroundStyle(prominent ? Color.black : Color.primary)
+            .frame(width: 48, height: 48)
+            .background(
+                prominent ? AnyShapeStyle(tint) : AnyShapeStyle(.thinMaterial),
+                in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+            )
+            .opacity(configuration.isPressed ? 0.75 : 1)
     }
 }

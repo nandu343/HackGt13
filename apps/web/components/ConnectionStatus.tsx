@@ -93,16 +93,12 @@ export function CollaborationBar({
         >
           {drawMode ? 'Sketching…' : 'AR sketch'}
         </button>
-        {drawMode && (
-          <>
-            <button type="button" className="btn ghost compact" onClick={onClearOwn}>
-              Clear mine
-            </button>
-            <button type="button" className="btn ghost compact" onClick={onClearAll}>
-              Clear all
-            </button>
-          </>
-        )}
+        <button type="button" className="btn ghost compact" onClick={onClearOwn}>
+          Clear mine
+        </button>
+        <button type="button" className="btn ghost compact" onClick={onClearAll}>
+          Clear all
+        </button>
         {onInvite && (
           <button
             type="button"

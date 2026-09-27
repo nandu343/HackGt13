@@ -34,7 +34,8 @@ import Foundation
 //
 // Existing furniture — RoomPlan marks scanned objects source="existing".
 //   Tap those entities in live camera AR to MOVE_OBJECT / DELETE_OBJECT;
-//   walls stay immovable. Mirrors web ObjectGizmo + SelectionBar behavior.
+//   drag a selected (or hit) entity on the floor plane to MOVE_OBJECT;
+//   walls stay immovable. Mirrors web ObjectGizmo floor-drag + SelectionBar.
 //
 // Live AR: ARKit world-tracking ARView (camera passthrough) after camera or RoomPlan scan.
 //   Catalog / AI objects = anchors; strokes = world-space polylines. Map twin is secondary.

@@ -88,7 +88,7 @@ API already binds `--host 0.0.0.0` via `npm run dev:api`. On a physical device, 
 open apps/ios/SharedSpatialAI.xcodeproj
 ```
 
-**Simulator:** Scan gate → **Use demo room** → map twin + Draw in space + Plan. **LiDAR device:** RoomPlan → **Live AR** (camera passthrough) with furniture overlays + free-space sketch. Same `scene_party_001` / Y-up meters as the web twin.
+**Simulator:** Scan gate → **Use demo room** → map twin + Draw in space + Plan. **LiDAR device:** RoomPlan → **Live AR** (camera passthrough) with furniture overlays + free-space sketch. Same `scene_party_001` / Y-up meters as the web twin. Catalog furniture renders as **GLB meshes** on web (`apps/web/public/models`) and **RealityKit multi-mesh composites** (optional USDZ) on iOS — not plain boxes.
 ---
 
 ## Demo loop

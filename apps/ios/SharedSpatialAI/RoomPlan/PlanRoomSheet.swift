@@ -1,9 +1,10 @@
 import SwiftUI
 
-/// Post-scan / post-demo intent sheet: ask what to make the room into, call `/ai/layout`, apply ops.
+/// Post-scan intent sheet: `/ai/layout` preview with recommended products + Open website.
 struct PlanRoomSheet: View {
     @Environment(SceneSyncStore.self) private var store
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
 
     @State private var scenario: Scenario = .party
     @State private var notes = ""
@@ -26,7 +27,7 @@ struct PlanRoomSheet: View {
             case .party: return "Party"
             case .study: return "Study"
             case .dinner: return "Dinner"
-            case .movie: return "Movie night"
+            case .movie: return "Movie"
             case .custom: return "Custom"
             }
         }
@@ -48,104 +49,20 @@ struct PlanRoomSheet: View {
     }
 
     private var composedPrompt: String {
-        let base: String
         if scenario == .custom {
-            base = notes.trimmingCharacters(in: .whitespacesAndNewlines)
-        } else {
-            let extra = notes.trimmingCharacters(in: .whitespacesAndNewlines)
-            base = extra.isEmpty ? scenario.prompt : "\(scenario.prompt) Extra notes: \(extra)"
+            return notes.trimmingCharacters(in: .whitespacesAndNewlines)
         }
-        return base
+        let extra = notes.trimmingCharacters(in: .whitespacesAndNewlines)
+        return extra.isEmpty ? scenario.prompt : "\(scenario.prompt) Extra notes: \(extra)"
     }
 
     var body: some View {
         NavigationStack {
             Form {
                 if phase == .compose {
-                    Section {
-                        Text("What do you and your friends want to make this space into?")
-                            .font(.headline)
-                        Text("AI returns recommended ops; Accept places them in the shared scene (web twin + AR).")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    Section("Scenario") {
-                        Picker("Scenario", selection: $scenario) {
-                            ForEach(Scenario.allCases) { s in
-                                Text(s.label).tag(s)
-                            }
-                        }
-                        .pickerStyle(.segmented)
-
-                        TextField(
-                            scenario == .custom ? "Describe the vibe" : "Optional notes",
-                            text: $notes,
-                            axis: .vertical
-                        )
-                        .lineLimit(2...4)
-                    }
-
-                    Section("Constraints") {
-                        Stepper("Guests: \(guestCount)", value: $guestCount, in: 1...100)
-                        HStack {
-                            Text("Budget $")
-                            Spacer()
-                            TextField("Budget", value: $budget, format: .number)
-                                .keyboardType(.decimalPad)
-                                .multilineTextAlignment(.trailing)
-                                .frame(maxWidth: 120)
-                        }
-                    }
-
-                    Section {
-                        Button {
-                            Task { await generate() }
-                        } label: {
-                            if store.isBusy {
-                                Label("Thinking…", systemImage: "sparkles")
-                            } else {
-                                Label("Get AI recommendations", systemImage: "wand.and.stars")
-                            }
-                        }
-                        .disabled(store.isBusy || composedPrompt.isEmpty)
-                    }
+                    composeSections
                 } else {
-                    Section("Recommendations") {
-                        if let preview {
-                            LabeledContent("Scenario", value: preview.scenario)
-                            if let mode = preview.plannerMode {
-                                LabeledContent("Planner", value: mode)
-                            }
-                            Text(preview.reasoningSummary)
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                            ForEach(Array(preview.operations.enumerated()), id: \.offset) { _, op in
-                                Text(opSummary(op))
-                                    .font(.caption.monospaced())
-                            }
-                            if let warnings = preview.warnings, !warnings.isEmpty {
-                                ForEach(warnings, id: \.self) { w in
-                                    Text(w).font(.caption).foregroundStyle(.orange)
-                                }
-                            }
-                        }
-                    }
-
-                    Section {
-                        Button("Accept into scene") {
-                            Task { await accept() }
-                        }
-                        .disabled(store.isBusy || (preview?.operations.isEmpty ?? true))
-
-                        Button("Back") {
-                            preview = nil
-                            phase = .compose
-                        }
-                        .disabled(store.isBusy)
-                    } footer: {
-                        Text("Ops are applied via POST /scene/{id}/operations. On device, refresh Viewer / AR to see new anchors in the shared Y-up room frame.")
-                    }
+                    previewSections
                 }
 
                 if let err = store.lastError {
@@ -154,6 +71,8 @@ struct PlanRoomSheet: View {
                     }
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(Color(red: 0.06, green: 0.07, blue: 0.09))
             .navigationTitle("Plan this room")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -161,6 +80,142 @@ struct PlanRoomSheet: View {
                     Button("Close") { dismiss() }
                 }
             }
+            .task {
+                await store.loadCatalogIfNeeded()
+            }
+        }
+        .preferredColorScheme(.dark)
+    }
+
+    @ViewBuilder
+    private var composeSections: some View {
+        Section {
+            Text("What should this space become?")
+                .font(.headline)
+            Text("AI returns layout ops and recommended products for Live AR + the web twin.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+
+        Section("Scenario") {
+            Picker("Scenario", selection: $scenario) {
+                ForEach(Scenario.allCases) { s in
+                    Text(s.label).tag(s)
+                }
+            }
+            .pickerStyle(.segmented)
+
+            TextField(
+                scenario == .custom ? "Describe the vibe" : "Optional notes",
+                text: $notes,
+                axis: .vertical
+            )
+            .lineLimit(2...4)
+        }
+
+        Section("Constraints") {
+            Stepper("Guests: \(guestCount)", value: $guestCount, in: 1...100)
+            HStack {
+                Text("Budget")
+                Spacer()
+                TextField("Budget", value: $budget, format: .currency(code: "USD"))
+                    .keyboardType(.decimalPad)
+                    .multilineTextAlignment(.trailing)
+                    .frame(maxWidth: 140)
+            }
+        }
+
+        Section {
+            Button {
+                Task { await generate() }
+            } label: {
+                if store.isBusy {
+                    Label("Thinking…", systemImage: "sparkles")
+                } else {
+                    Label("Get AI recommendations", systemImage: "wand.and.stars")
+                }
+            }
+            .disabled(store.isBusy || composedPrompt.isEmpty)
+        }
+    }
+
+    @ViewBuilder
+    private var previewSections: some View {
+        Section("Layout") {
+            if let preview {
+                LabeledContent("Scenario", value: preview.scenario.capitalized)
+                if let mode = preview.plannerMode {
+                    LabeledContent("Planner", value: mode)
+                }
+                Text(preview.reasoningSummary)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        }
+
+        if let picks = preview?.valuePicks, !picks.isEmpty {
+            Section("Recommended products") {
+                ForEach(picks) { pick in
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text(pick.name ?? pick.productId)
+                                .font(.subheadline.weight(.semibold))
+                            Spacer()
+                            if let price = pick.price {
+                                Text(String(format: "$%.0f", price))
+                                    .font(.subheadline.monospacedDigit())
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        Text(pick.reason)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        if let rating = pick.rating {
+                            Text(String(format: "★ %.1f · score %.0f", rating, pick.score))
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                        }
+                        if let url = store.catalogItem(productId: pick.productId)?.openWebsiteURL {
+                            Button {
+                                openURL(url)
+                            } label: {
+                                Label("Open website", systemImage: "safari")
+                                    .font(.caption.weight(.semibold))
+                            }
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+            }
+        }
+
+        Section("Operations") {
+            if let preview {
+                ForEach(Array(preview.operations.enumerated()), id: \.offset) { _, op in
+                    Text(opSummary(op))
+                        .font(.caption.monospaced())
+                }
+                if let warnings = preview.warnings, !warnings.isEmpty {
+                    ForEach(warnings, id: \.self) { w in
+                        Text(w).font(.caption).foregroundStyle(.orange)
+                    }
+                }
+            }
+        }
+
+        Section {
+            Button("Accept into scene") {
+                Task { await accept() }
+            }
+            .disabled(store.isBusy || (preview?.operations.isEmpty ?? true))
+
+            Button("Back") {
+                preview = nil
+                phase = .compose
+            }
+            .disabled(store.isBusy)
+        } footer: {
+            Text("Accept applies ops via POST /scene/{id}/operations. Furniture appears as 3D meshes in Live AR.")
         }
     }
 
@@ -185,6 +240,7 @@ struct PlanRoomSheet: View {
                 )
             )
             preview = layout
+            store.lastLayout = layout
             phase = .preview
             store.statusMessage = "AI ready: \(layout.scenario)"
         } catch {

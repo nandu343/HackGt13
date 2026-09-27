@@ -1,7 +1,14 @@
 'use client';
 
-import { Suspense, useMemo, useRef, useState, type RefObject } from 'react';
-import { Canvas, type ThreeEvent, useFrame, useThree } from '@react-three/fiber';
+import {
+  Suspense,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type RefObject
+} from 'react';
+import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { ContactShadows, Line, OrbitControls } from '@react-three/drei';
 import { XR, createXRStore } from '@react-three/xr';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
@@ -156,8 +163,10 @@ function RoomShell({ bounds }: { bounds: RoomBounds }) {
 }
 
 function StrokeLines({ strokes }: { strokes: DrawingStroke[] }) {
+  // Key by stroke set so clears remount geometry (drei Line can retain GPU state).
+  const setKey = strokes.map((s) => s.strokeId).join('|') || 'empty';
   return (
-    <group>
+    <group key={setKey}>
       {strokes.map((s) => (
         <Line
           key={s.strokeId}
@@ -171,9 +180,12 @@ function StrokeLines({ strokes }: { strokes: DrawingStroke[] }) {
   );
 }
 
+/** Draw depth in front of camera (meters) — keeps strokes under the pointer. */
+const DRAW_DEPTH_M = 1.35;
+
 /**
- * Free-space drawing layer: place points along the pointer ray in world coords.
- * Prefers mesh hits; otherwise samples a point a fixed depth in front of the camera.
+ * Free-space drawing: CSS-pixel NDC → camera ray → camera-facing plane at fixed
+ * depth. Does not use mesh `e.point` (volume/plane hits caused AR offset).
  */
 function DrawingLayer({
   bounds,
@@ -189,122 +201,131 @@ function DrawingLayer({
   const drawing = useRef(false);
   const points = useRef<Vector3[]>([]);
   const [preview, setPreview] = useState<Vector3[]>([]);
-  const { camera, gl, raycaster, pointer } = useThree();
-  const hitMeshes = useRef<THREE.Object3D[]>([]);
+  const { camera, gl, raycaster } = useThree();
+  const ndc = useRef(new THREE.Vector2());
+  const drawPlane = useRef(new THREE.Plane());
+  const hit = useRef(new THREE.Vector3());
+  const camDir = useRef(new THREE.Vector3());
+  const boundsRef = useRef(bounds);
+  boundsRef.current = bounds;
+  const completeRef = useRef(onStrokeComplete);
+  completeRef.current = onStrokeComplete;
 
-  const sampleWorldPoint = (e?: ThreeEvent<PointerEvent>): Vector3 | null => {
-    if (e?.point) {
-      return [e.point.x, e.point.y, e.point.z];
+  const sampleWorldPoint = (clientX: number, clientY: number): Vector3 | null => {
+    const canvas = gl.domElement;
+    const rect = canvas.getBoundingClientRect();
+    if (rect.width < 1 || rect.height < 1) return null;
+    // CSS pixels → NDC (not buffer pixels × dpr).
+    const x = ((clientX - rect.left) / rect.width) * 2 - 1;
+    const y = -((clientY - rect.top) / rect.height) * 2 + 1;
+    ndc.current.set(x, y);
+    raycaster.setFromCamera(ndc.current, camera);
+
+    camera.getWorldDirection(camDir.current);
+    const planePoint = camera.position
+      .clone()
+      .addScaledVector(camDir.current, DRAW_DEPTH_M);
+    drawPlane.current.setFromNormalAndCoplanarPoint(camDir.current, planePoint);
+
+    if (!raycaster.ray.intersectPlane(drawPlane.current, hit.current)) {
+      hit.current
+        .copy(raycaster.ray.origin)
+        .addScaledVector(raycaster.ray.direction, DRAW_DEPTH_M);
     }
-    raycaster.setFromCamera(pointer, camera);
-    const hits = raycaster.intersectObjects(hitMeshes.current, true);
-    if (hits[0]) {
-      const p = hits[0].point;
-      return [p.x, p.y, p.z];
-    }
-    // Free space: fixed depth along ray (~1.4 m) — mid-air sketch.
-    const dir = raycaster.ray.direction.clone().normalize();
-    const origin = raycaster.ray.origin;
-    const depth = 1.4;
-    const p = origin.clone().addScaledVector(dir, depth);
-    const hw = bounds.width / 2 + 0.5;
-    const hl = bounds.length / 2 + 0.5;
-    const x = Math.max(-hw, Math.min(hw, p.x));
-    const y = Math.max(0.15, Math.min(bounds.height + 0.4, p.y));
-    const z = Math.max(-hl, Math.min(hl, p.z));
-    return [x, y, z];
+
+    const b = boundsRef.current;
+    const hw = b.width / 2 + 0.75;
+    const hl = b.length / 2 + 0.75;
+    return [
+      Math.max(-hw, Math.min(hw, hit.current.x)),
+      Math.max(0.05, Math.min(b.height + 0.6, hit.current.y)),
+      Math.max(-hl, Math.min(hl, hit.current.z))
+    ];
   };
+
+  useEffect(() => {
+    if (!active) {
+      drawing.current = false;
+      points.current = [];
+      setPreview([]);
+      gl.domElement.style.cursor = '';
+      return;
+    }
+
+    const el = gl.domElement;
+    el.style.cursor = 'crosshair';
+    el.style.touchAction = 'none';
+
+    const finish = () => {
+      if (!drawing.current) return;
+      drawing.current = false;
+      const pts = points.current;
+      points.current = [];
+      setPreview([]);
+      if (pts.length >= 2) completeRef.current(pts, 'free');
+    };
+
+    const onDown = (e: PointerEvent) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      e.stopPropagation();
+      try {
+        el.setPointerCapture(e.pointerId);
+      } catch {
+        // ignore
+      }
+      const p = sampleWorldPoint(e.clientX, e.clientY);
+      if (!p) return;
+      drawing.current = true;
+      points.current = [p];
+      setPreview([p]);
+    };
+
+    const onMove = (e: PointerEvent) => {
+      if (!drawing.current) return;
+      e.preventDefault();
+      const p = sampleWorldPoint(e.clientX, e.clientY);
+      if (!p) return;
+      const last = points.current[points.current.length - 1];
+      const dx = p[0] - last[0];
+      const dy = p[1] - last[1];
+      const dz = p[2] - last[2];
+      if (dx * dx + dy * dy + dz * dz < 0.00025) return;
+      points.current = [...points.current, p];
+      setPreview([...points.current]);
+    };
+
+    const onUp = (e: PointerEvent) => {
+      try {
+        el.releasePointerCapture(e.pointerId);
+      } catch {
+        // ignore
+      }
+      finish();
+    };
+
+    el.addEventListener('pointerdown', onDown, { capture: true });
+    el.addEventListener('pointermove', onMove, { capture: true });
+    el.addEventListener('pointerup', onUp, { capture: true });
+    el.addEventListener('pointercancel', onUp, { capture: true });
+    return () => {
+      el.removeEventListener('pointerdown', onDown, true);
+      el.removeEventListener('pointermove', onMove, true);
+      el.removeEventListener('pointerup', onUp, true);
+      el.removeEventListener('pointercancel', onUp, true);
+      el.style.cursor = '';
+      el.style.touchAction = '';
+      drawing.current = false;
+      points.current = [];
+    };
+    // sampleWorldPoint closes over camera/gl/raycaster from this render
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, gl, camera, raycaster]);
 
   if (!active) return null;
 
-  const finish = () => {
-    gl.domElement.style.cursor = '';
-    if (!drawing.current) return;
-    drawing.current = false;
-    const pts = points.current;
-    points.current = [];
-    setPreview([]);
-    if (pts.length >= 2) onStrokeComplete(pts, 'free');
-  };
-
   return (
     <group>
-      {/* Invisible volume catcher for ray hits */}
-      <mesh
-        position={[0, bounds.height / 2, 0]}
-        visible={false}
-        ref={(obj) => {
-          if (obj) hitMeshes.current = [obj];
-        }}
-        onPointerDown={(e) => {
-          e.stopPropagation();
-          gl.domElement.style.cursor = 'crosshair';
-          const p = sampleWorldPoint(e);
-          if (!p) return;
-          drawing.current = true;
-          points.current = [p];
-          setPreview([p]);
-        }}
-        onPointerMove={(e) => {
-          if (!drawing.current) return;
-          e.stopPropagation();
-          const p = sampleWorldPoint(e);
-          if (!p) return;
-          const last = points.current[points.current.length - 1];
-          const dx = p[0] - last[0];
-          const dy = p[1] - last[1];
-          const dz = p[2] - last[2];
-          if (dx * dx + dy * dy + dz * dz < 0.0004) return;
-          points.current = [...points.current, p];
-          setPreview([...points.current]);
-        }}
-        onPointerUp={(e) => {
-          e.stopPropagation();
-          finish();
-        }}
-        onPointerLeave={() => finish()}
-      >
-        <boxGeometry args={[bounds.width * 1.4, bounds.height * 1.4, bounds.length * 1.4]} />
-        <meshBasicMaterial transparent opacity={0} side={THREE.DoubleSide} />
-      </mesh>
-      {/* Mid-air draw surface — fully invisible so it never paints over the camera */}
-      <mesh
-        position={[0, 1.2, 0]}
-        onPointerDown={(e) => {
-          e.stopPropagation();
-          gl.domElement.style.cursor = 'crosshair';
-          const p = sampleWorldPoint(e);
-          if (!p) return;
-          drawing.current = true;
-          points.current = [p];
-          setPreview([p]);
-        }}
-        onPointerMove={(e) => {
-          if (!drawing.current) return;
-          e.stopPropagation();
-          const p = sampleWorldPoint(e);
-          if (!p) return;
-          const last = points.current[points.current.length - 1];
-          const dx = p[0] - last[0];
-          const dy = p[1] - last[1];
-          const dz = p[2] - last[2];
-          if (dx * dx + dy * dy + dz * dz < 0.0004) return;
-          points.current = [...points.current, p];
-          setPreview([...points.current]);
-        }}
-        onPointerUp={(e) => {
-          e.stopPropagation();
-          finish();
-        }}
-      >
-        <planeGeometry args={[bounds.width * 2, bounds.height * 2]} />
-        <meshBasicMaterial
-          transparent
-          opacity={0}
-          side={THREE.DoubleSide}
-          depthWrite={false}
-        />
-      </mesh>
       {preview.length >= 2 && (
         <Line
           points={preview.map((p) => new THREE.Vector3(p[0], p[1], p[2]))}
@@ -439,6 +460,8 @@ export function SceneCanvas({
                 setDragging={setDragging}
                 disabled={disabled || drawMode}
                 arOverlay={arMode}
+                // Floor-plane drag: Camera AR (touch) + Map twin.
+                floorDrag
               />
             ))}
             {ghostObjectsA.length > 0 && (

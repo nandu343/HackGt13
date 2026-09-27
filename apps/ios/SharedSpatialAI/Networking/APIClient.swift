@@ -121,6 +121,18 @@ actor APIClient {
         }
     }
 
+    /// GET /catalog — full product list (name, price, modelUrl, productUrl).
+    func fetchCatalog() async throws -> [CatalogItemDTO] {
+        let url = APIConfig.baseURL.appending(path: "catalog")
+        let (data, response) = try await session.data(from: url)
+        try Self.throwIfNeeded(response, data: data)
+        do {
+            return try decoder.decode([CatalogItemDTO].self, from: data)
+        } catch {
+            throw APIClientError.decoding(error)
+        }
+    }
+
     /// POST /ai/layout — hybrid planner ops (not applied until client Accept).
     func postAiLayout(_ payload: LayoutRequestDTO) async throws -> LayoutResponseDTO {
         let url = APIConfig.baseURL.appending(path: "ai/layout")

@@ -106,7 +106,9 @@ struct SceneObjectDTO: Codable, Identifiable, Equatable, Sendable {
     var dimensions: DimensionsDTO?
     var productId: String?
     var assetId: String?
+    var modelUrl: String?
     var lockedBy: String?
+    var lockedUntil: String?
 }
 
 struct RoomBoundsDTO: Codable, Equatable, Sendable {
@@ -144,6 +146,61 @@ struct SceneOperationDTO: Codable, Equatable, Sendable {
     var dimensions: DimensionsDTO?
     var movable: Bool?
     var source: String?
+    /// Optional GLB/USDZ path copied from catalog onto ADD_OBJECT.
+    var modelUrl: String?
+
+    static func move(objectId: String, to position: Vector3) -> SceneOperationDTO {
+        SceneOperationDTO(
+            type: .moveObject,
+            objectId: objectId,
+            targetPosition: position,
+            targetRotation: nil,
+            assetId: nil,
+            productId: nil,
+            objectType: nil,
+            dimensions: nil,
+            movable: nil,
+            source: nil,
+            modelUrl: nil
+        )
+    }
+
+    static func delete(objectId: String) -> SceneOperationDTO {
+        SceneOperationDTO(
+            type: .deleteObject,
+            objectId: objectId,
+            targetPosition: nil,
+            targetRotation: nil,
+            assetId: nil,
+            productId: nil,
+            objectType: nil,
+            dimensions: nil,
+            movable: nil,
+            source: nil,
+            modelUrl: nil
+        )
+    }
+
+    static func add(from item: CatalogItemDTO, objectId: String, position: Vector3) -> SceneOperationDTO {
+        let dims = item.dimensions
+        let typeHint = item.category
+            ?? item.tags?.first
+            ?? item.productId.components(separatedBy: "_").first
+            ?? "furniture"
+        return SceneOperationDTO(
+            type: .addObject,
+            objectId: objectId,
+            targetPosition: position,
+            targetRotation: .identity,
+            assetId: item.assetId,
+            productId: item.productId,
+            objectType: typeHint,
+            dimensions: dims,
+            movable: true,
+            source: "catalog",
+            modelUrl: item.modelUrl
+        )
+    }
 }
 
 struct OperationEnvelopeDTO: Codable, Sendable {

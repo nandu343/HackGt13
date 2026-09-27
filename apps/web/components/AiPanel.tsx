@@ -18,7 +18,8 @@ export function AiPanel() {
     proposeDisagreement,
     disagreement,
     isBusy,
-    openIntentModal
+    openIntentModal,
+    productMap
   } = useSceneStore();
 
   const warnings = pendingLayout?.warnings ?? [];
@@ -111,15 +112,27 @@ export function AiPanel() {
           <p className="ai-reasoning">{pendingLayout.reasoningSummary}</p>
           {valuePicks.length > 0 && (
             <ul className="value-pick-list">
-              {valuePicks.map((vp) => (
-                <li key={`${vp.objectId ?? ''}-${vp.productId}`}>
-                  <span className="value-badge">Best value pick</span>{' '}
-                  {vp.name ?? vp.productId}
-                  {vp.rating != null ? ` · ★${vp.rating.toFixed(1)}` : ''}
-                  {vp.price != null ? ` · $${vp.price.toFixed(0)}` : ''}
-                  <span className="value-reason">{vp.reason}</span>
-                </li>
-              ))}
+              {valuePicks.map((vp) => {
+                const cat = productMap.get(vp.productId);
+                const url = cat?.productUrl || cat?.websiteUrl || null;
+                return (
+                  <li key={`${vp.objectId ?? ''}-${vp.productId}`}>
+                    <span className="value-badge">Best value pick</span>{' '}
+                    {vp.name ?? vp.productId}
+                    {vp.rating != null ? ` · ★${vp.rating.toFixed(1)}` : ''}
+                    {vp.price != null ? ` · $${vp.price.toFixed(0)}` : ''}
+                    {url ? (
+                      <>
+                        {' '}
+                        <a href={url} target="_blank" rel="noopener noreferrer">
+                          Open website
+                        </a>
+                      </>
+                    ) : null}
+                    <span className="value-reason">{vp.reason}</span>
+                  </li>
+                );
+              })}
             </ul>
           )}
           <ul className="op-list">

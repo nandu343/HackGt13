@@ -28,6 +28,7 @@ class SceneObject(CamelModel):
     dimensions: Dimensions | None = None
     product_id: str | None = None
     asset_id: str | None = None
+    model_url: str | None = None
     locked_by: str | None = None
     locked_until: str | None = None
 

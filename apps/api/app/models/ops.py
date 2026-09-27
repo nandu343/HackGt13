@@ -28,6 +28,7 @@ class SceneOperation(CamelModel):
     dimensions: Dimensions | None = None
     movable: bool | None = None
     source: Literal['existing', 'catalog'] | None = None
+    model_url: str | None = None
 
 
 class OperationEnvelope(CamelModel):

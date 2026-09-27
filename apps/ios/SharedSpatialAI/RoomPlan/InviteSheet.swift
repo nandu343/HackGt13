@@ -13,7 +13,7 @@ struct InviteSheet: View {
         NavigationStack {
             Form {
                 Section {
-                    Text("Friends open this link in the web twin and land on the same room map (`\(store.sceneId)`).")
+                    Text("Friends open this link in the web twin on the same room (`\(store.sceneId)`).")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
@@ -23,9 +23,12 @@ struct InviteSheet: View {
                         Text(link)
                             .font(.caption.monospaced())
                             .textSelection(.enabled)
-                        Button(copied ? "Copied" : "Copy link") {
+                            .padding(.vertical, 4)
+                        Button {
                             UIPasteboard.general.string = link
                             copied = true
+                        } label: {
+                            Label(copied ? "Copied" : "Copy link", systemImage: copied ? "checkmark" : "doc.on.doc")
                         }
                         ShareLink(item: link) {
                             Label("Share…", systemImage: "square.and.arrow.up")
@@ -45,15 +48,19 @@ struct InviteSheet: View {
                 }
 
                 Section {
-                    Button("Create / refresh invite") {
+                    Button {
                         Task {
                             copied = false
                             link = await store.createInviteLink()
                         }
+                    } label: {
+                        Label("Create / refresh invite", systemImage: "link.badge.plus")
                     }
                     .disabled(store.isBusy)
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(Color(red: 0.06, green: 0.07, blue: 0.09))
             .navigationTitle("Invite friends")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -67,5 +74,6 @@ struct InviteSheet: View {
                 }
             }
         }
+        .preferredColorScheme(.dark)
     }
 }

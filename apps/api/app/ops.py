@@ -62,10 +62,13 @@ def apply_operations(
                 item = catalog[op.product_id]
                 obj.product_id = item.product_id
                 obj.asset_id = item.asset_id
+                obj.model_url = item.model_url or obj.model_url
                 if item.dimensions:
                     obj.dimensions = item.dimensions.model_copy(deep=True)
             if op.asset_id:
                 obj.asset_id = op.asset_id
+            if op.model_url:
+                obj.model_url = op.model_url
 
         elif op.type == 'ADD_OBJECT':
             new_id = op.object_id or f'obj_{uuid.uuid4().hex[:8]}'
@@ -78,6 +81,14 @@ def apply_operations(
                 else (0.5, 0.5, 0.5)
             )
             clamped, _ = clamp_position_to_bounds(position, working, dims_tuple)
+            model_url = op.model_url or (product.model_url if product else None)
+            if not model_url:
+                from .model_assets import resolve_model_url
+
+                model_url = resolve_model_url(
+                    asset_id=op.asset_id or (product.asset_id if product else None),
+                    product_id=op.product_id or (product.product_id if product else None),
+                )
             objects[new_id] = SceneObject(
                 id=new_id,
                 type=op.object_type or (product.name if product else 'object'),
@@ -91,6 +102,7 @@ def apply_operations(
                 dimensions=dims,
                 product_id=op.product_id or (product.product_id if product else None),
                 asset_id=op.asset_id or (product.asset_id if product else None),
+                model_url=model_url,
             )
 
     working.objects = list(objects.values())

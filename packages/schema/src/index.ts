@@ -36,6 +36,8 @@ export const SceneObjectSchema = z.object({
   // FastAPI/Pydantic serializes missing optionals as null — accept both.
   productId: z.string().nullable().optional(),
   assetId: z.string().nullable().optional(),
+  /** GLB/USDZ path e.g. /models/sofa.glb — resolved from catalog when placing. */
+  modelUrl: z.string().nullable().optional(),
   lockedBy: z.string().nullable().optional(),
   lockedUntil: z.string().nullable().optional()
 });
@@ -79,7 +81,9 @@ export const SceneOperationSchema = z.object({
   objectType: z.string().nullish(),
   dimensions: DimensionsSchema.nullish(),
   movable: z.boolean().nullish(),
-  source: z.enum(['existing', 'catalog']).nullish()
+  source: z.enum(['existing', 'catalog']).nullish(),
+  /** Optional GLB/USDZ URL copied from catalog onto ADD_OBJECT. */
+  modelUrl: z.string().nullish()
 });
 export type SceneOperation = z.infer<typeof SceneOperationSchema>;
 
@@ -154,6 +158,12 @@ export const ProductSchema = z.object({
   currency: z.string().default('USD'),
   dimensions: DimensionsSchema.optional(),
   assetId: z.string().nullable().optional(),
+  /** Public path to GLB (web) / USDZ (iOS) e.g. /models/sofa.glb */
+  modelUrl: z.string().nullable().optional(),
+  /** Retailer product page (Amazon / IKEA-style). Open in new tab from Shop. */
+  productUrl: z.string().nullable().optional(),
+  /** Alias accepted from some feeds — prefer productUrl. */
+  websiteUrl: z.string().nullable().optional(),
   tags: z.array(z.string()).optional(),
   purchasable: z.boolean().default(true),
   virtualOnly: z.boolean().default(false),
@@ -191,11 +201,13 @@ export const DrawingStrokeSchema = z.object({
   strokeId: z.string(),
   sceneId: z.string(),
   actorId: z.string(),
+  /** CSS / hex color — synced over WS so peers see the chosen stroke color. */
   color: z.string().default('#6ec8e8'),
   width: z.number().positive().default(0.02),
   points: z.array(Vector3Schema).min(2),
-  plane: z.enum(['wall', 'floor', 'free']).optional(),
-  createdAt: z.string().optional()
+  /** nullish: API may serialize unset plane as null. */
+  plane: z.enum(['wall', 'floor', 'free']).nullish(),
+  createdAt: z.string().nullish()
 });
 export type DrawingStroke = z.infer<typeof DrawingStrokeSchema>;
 

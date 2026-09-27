@@ -1,0 +1,10 @@
+3D furniture models (CC0 / public domain):
+
+- Kenney Furniture Kit (https://kenney.nl/assets/furniture-kit) — loungeChair, chairDesk,
+  table, sideTable, desk, lampRoundFloor, lampSquareTable, pottedPlant, rugRectangle,
+  bedSingle, bookcase*, cabinetTelevision, bathroomMirror, doorwayOpen, wallWindow.
+- Local multi-mesh GLBs (sofa, stool, beanbag, pendant, backdrop, projector_screen,
+  string_lights) generated for catalog types not in the Kenney subset.
+
+Web loads GLB via drei useGLTF. iOS Live AR / map twin use RealityKit multi-mesh
+furniture composites (optional USDZ when shipped under Apps/ios/.../Models/).

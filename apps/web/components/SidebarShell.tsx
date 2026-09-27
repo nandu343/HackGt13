@@ -29,7 +29,7 @@ const TOOLS: {
 const DRAWER_TITLES: Record<Exclude<HudToolId, 'select'>, string> = {
   draw: 'AR sketch',
   plan: 'AI layout',
-  shop: 'Shop',
+  shop: 'Shop / Recommendations',
   timeline: 'Timeline',
   disagree: 'Disagreement',
   voice: 'Voice & presence'

@@ -15,6 +15,7 @@ import { CameraARBackground } from '../components/CameraARBackground';
 import { RoomEntryGate } from '../components/RoomEntryGate';
 import { SceneCanvas, xrStore, type ViewMode } from '../components/SceneCanvas';
 import { SelectionBar } from '../components/SelectionBar';
+import { ShopRecommendations } from '../components/ShopRecommendations';
 import { SidebarShell } from '../components/SidebarShell';
 import { TimelinePanel } from '../components/TimelinePanel';
 import { ToastStack } from '../components/ToastStack';
@@ -70,6 +71,8 @@ function Workspace({
     addStroke,
     clearOwnStrokes,
     clearAllStrokes,
+    drawColor,
+    setDrawColor,
     openIntentModal,
     reportPresencePose,
     disagreement,
@@ -263,6 +266,7 @@ function Workspace({
             disabled={isBusy || animating || showGate}
             drawMode={drawMode && !showGate}
             strokes={strokes}
+            drawColor={drawColor}
             presence={presence}
             localUserId={actorId}
             onPresencePose={reportPresencePose}
@@ -275,7 +279,7 @@ function Workspace({
                 strokeId: `stroke_${Date.now().toString(36)}_${Math.random()
                   .toString(36)
                   .slice(2, 6)}`,
-                color: '#e2b45c',
+                color: drawColor,
                 width: 0.025,
                 points,
                 plane: plane ?? 'free'
@@ -448,6 +452,7 @@ function Workspace({
             plan={<AiPanel />}
             shop={
               <>
+                <ShopRecommendations />
                 <BudgetPanel />
                 <CatalogPanel />
               </>
@@ -458,6 +463,34 @@ function Workspace({
                   Draw in space — free 3D strokes along your pointer ray (not stuck to a
                   wall). Syncs live to everyone in the room.
                 </p>
+                <div className="color-swatches" role="group" aria-label="Stroke color">
+                  {[
+                    '#e2b45c',
+                    '#6ec8e8',
+                    '#e8787e',
+                    '#6aaa7e',
+                    '#c9a66b',
+                    '#f0f2f5'
+                  ].map((c) => (
+                    <button
+                      key={c}
+                      type="button"
+                      className={`color-swatch ${drawColor === c ? 'is-active' : ''}`}
+                      style={{ background: c }}
+                      aria-label={`Color ${c}`}
+                      aria-pressed={drawColor === c}
+                      onClick={() => setDrawColor(c)}
+                    />
+                  ))}
+                  <label className="color-swatch-custom" title="Custom color">
+                    <input
+                      type="color"
+                      value={drawColor}
+                      onChange={(e) => setDrawColor(e.target.value)}
+                      aria-label="Custom stroke color"
+                    />
+                  </label>
+                </div>
                 <div className="btn-row">
                   <button
                     type="button"

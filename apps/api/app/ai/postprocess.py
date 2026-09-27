@@ -111,6 +111,25 @@ def postprocess_layout(
             + ('…' if len(surviving_picks) > 4 else '')
         )
 
+    # Attach modelUrl from catalog onto ADD_OBJECT ops so clients render GLB/USDZ meshes.
+    from ..model_assets import resolve_model_url
+
+    hydrated = []
+    for op in cleaned:
+        if op.type == 'ADD_OBJECT':
+            product = catalog.get(op.product_id) if op.product_id else None
+            url = (
+                op.model_url
+                or (product.model_url if product else None)
+                or resolve_model_url(asset_id=op.asset_id, product_id=op.product_id)
+            )
+            if url and op.model_url != url:
+                op = op.model_copy(update={'model_url': url})
+            if product and not op.asset_id and product.asset_id:
+                op = op.model_copy(update={'asset_id': product.asset_id})
+        hydrated.append(op)
+    cleaned = hydrated
+
     # Deduplicate warnings while preserving order
     seen: set[str] = set()
     unique_warnings: list[str] = []

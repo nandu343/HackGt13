@@ -22,6 +22,7 @@ def _obj(
     movable: bool = True,
     product_id: str | None = None,
     asset_id: str | None = None,
+    model_url: str | None = None,
 ) -> SceneObject:
     return SceneObject(
         id=id,
@@ -36,6 +37,7 @@ def _obj(
         dimensions=Dimensions(**dimensions) if dimensions else None,
         product_id=product_id,
         asset_id=asset_id,
+        model_url=model_url,
     )
 
 
@@ -55,6 +57,8 @@ def build_demo_scene() -> Scene:
                 rotation=[0, 0.707, 0, 0.707],
                 dimensions={'width': 2.1, 'height': 0.82, 'depth': 0.91},
                 product_id='product_sofa_01',
+                asset_id='asset_sofa_01',
+                model_url='/models/sofa.glb',
             ),
             _obj(
                 id='lamp_17',
@@ -64,6 +68,7 @@ def build_demo_scene() -> Scene:
                 position=[-1.62, 0.86, 2.1],
                 asset_id='asset_lamp_12',
                 product_id='product_39',
+                model_url='/models/lampRoundFloor.glb',
                 dimensions={'width': 0.4, 'height': 1.72, 'depth': 0.4},
             ),
             _obj(
@@ -73,6 +78,8 @@ def build_demo_scene() -> Scene:
                 movable=True,
                 position=[1.5, 0.375, 0.2],
                 product_id='product_table_05',
+                asset_id='asset_table_05',
+                model_url='/models/table.glb',
                 dimensions={'width': 1.4, 'height': 0.75, 'depth': 1.1},
             ),
             _obj(
@@ -90,6 +97,22 @@ def build_demo_scene() -> Scene:
     return scene
 
 
+def _product_url(product_id: str, name: str) -> str | None:
+    """Plausible retailer deep-links for Shop / Open website."""
+    slug = name.lower().replace(' ', '-')
+    # Virtual helpers are not purchasable — no storefront URL.
+    if product_id.startswith('virtual_'):
+        return None
+    if 'ikea' in slug or product_id in (
+        'desk_study_01',
+        'table_dining_01',
+        'plant_tall_02',
+        'lamp_desk_01',
+    ):
+        return f'https://www.ikea.com/us/en/p/{slug}-{product_id}/'
+    return f'https://www.amazon.com/s?k={slug.replace("-", "+")}'
+
+
 def _item(
     product_id: str,
     name: str,
@@ -105,13 +128,23 @@ def _item(
     quality_tier: QualityTier = 'standard',
     purchasable: bool = True,
     virtual_only: bool = False,
+    model_url: str | None = None,
+    product_url: str | None = None,
 ) -> CatalogItem:
+    from .model_assets import resolve_model_url
+
+    url = product_url if product_url is not None else _product_url(product_id, name)
     return CatalogItem(
         product_id=product_id,
         name=name,
         price=price,
         dimensions=Dimensions(width=width, height=height, depth=depth),
         asset_id=asset_id,
+        model_url=resolve_model_url(
+            model_url=model_url, asset_id=asset_id, product_id=product_id
+        ),
+        product_url=url,
+        website_url=url,
         tags=tags,
         category=category,
         rating=rating,

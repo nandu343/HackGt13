@@ -63,6 +63,19 @@ import {
   type IntentDraftPayload,
   type IntentIdeaPayload
 } from './ws';
+
+/** Collect purchasable product ids from AI value picks + ADD_OBJECT ops. */
+function collectRecommendedProductIds(layout: LayoutResponse): string[] {
+  const ids = new Set<string>();
+  for (const vp of layout.valuePicks ?? []) {
+    if (vp.productId) ids.add(vp.productId);
+  }
+  for (const op of layout.operations ?? []) {
+    if (op.type === 'ADD_OBJECT' && op.productId) ids.add(op.productId);
+  }
+  return [...ids];
+}
+
 export const DEMO_SCENE_ID = 'scene_party_001';
 
 function resolveActorId(): string {
@@ -155,6 +168,11 @@ type SceneStoreValue = {
   voice: VoiceState;
   drawMode: boolean;
   strokes: DrawingStroke[];
+  /** Active stroke color for new sketches (synced on each stroke). */
+  drawColor: string;
+  setDrawColor: (color: string) => void;
+  /** Product ids from AI value picks / ADD_OBJECT — shown in Shop after Generate/Accept. */
+  recommendedProductIds: string[];
   intentModalOpen: boolean;
   intentIdeas: IntentIdea[];
   intentDraft: IntentDraft | null;
@@ -258,6 +276,8 @@ export function SceneStoreProvider({
   });
   const [drawMode, setDrawMode] = useState(false);
   const [strokes, setStrokes] = useState<DrawingStroke[]>([]);
+  const [drawColor, setDrawColor] = useState('#e2b45c');
+  const [recommendedProductIds, setRecommendedProductIds] = useState<string[]>([]);
   const [intentModalOpen, setIntentModalOpen] = useState(false);
   const [intentIdeas, setIntentIdeas] = useState<IntentIdea[]>([]);
   const [intentDraft, setIntentDraft] = useState<IntentDraft | null>(null);
@@ -647,21 +667,30 @@ export function SceneStoreProvider({
           return;
         }
         if (msg.type === 'draw_clear') {
+          // Prefer authoritative remaining strokes[]; fall back to removed ids / scope.
           if (Array.isArray(msg.strokes)) {
             const parsed: DrawingStroke[] = [];
             for (const raw of msg.strokes) {
               try {
                 parsed.push(DrawingStrokeSchema.parse(raw));
               } catch {
-                // skip
+                // skip invalid
               }
             }
             setStrokes(parsed);
+          } else if (
+            Array.isArray(msg.removedStrokeIds) &&
+            msg.removedStrokeIds.length > 0
+          ) {
+            const gone = new Set(msg.removedStrokeIds);
+            setStrokes((prev) => prev.filter((s) => !gone.has(s.strokeId)));
           } else if (msg.scope === 'all') {
             setStrokes([]);
           } else if (msg.actorId) {
             const aid = msg.actorId;
             setStrokes((prev) => prev.filter((s) => s.actorId !== aid));
+          } else {
+            setStrokes([]);
           }
           return;
         }
@@ -831,7 +860,7 @@ export function SceneStoreProvider({
         color: partial.color ?? '#6ec8e8',
         width: partial.width ?? 0.02,
         points: partial.points,
-        plane: partial.plane,
+        plane: partial.plane ?? 'free',
         createdAt: partial.createdAt ?? new Date().toISOString()
       };
       setStrokes((prev) => {
@@ -839,23 +868,34 @@ export function SceneStoreProvider({
         return [...prev, stroke];
       });
       const sock = socketRef.current;
-      if (sock) sendDrawStroke(sock, stroke);
+      if (sock && sock.readyState === WebSocket.OPEN) {
+        sendDrawStroke(sock, stroke);
+      }
     },
     []
   );
 
   const clearOwnStrokes = useCallback(() => {
     const actor = actorIdRef.current;
-    setStrokes((prev) => prev.filter((s) => s.actorId !== actor));
+    setStrokes((prev) => {
+      const next = prev.filter((s) => s.actorId !== actor);
+      return next;
+    });
     const sock = socketRef.current;
-    if (sock) sendDrawClear(sock, actor, 'own');
-  }, []);
+    if (sock && sock.readyState === WebSocket.OPEN) {
+      sendDrawClear(sock, actor, 'own');
+    }
+    pushToast('Cleared your strokes', 'info');
+  }, [pushToast]);
 
   const clearAllStrokes = useCallback(() => {
     setStrokes([]);
     const sock = socketRef.current;
-    if (sock) sendDrawClear(sock, actorIdRef.current, 'all');
-  }, []);
+    if (sock && sock.readyState === WebSocket.OPEN) {
+      sendDrawClear(sock, actorIdRef.current, 'all');
+    }
+    pushToast('Cleared all strokes', 'info');
+  }, [pushToast]);
 
   const commitOps = useCallback(
     async (
@@ -1001,6 +1041,7 @@ export function SceneStoreProvider({
         const layout = await postAiLayout(payload, { signal: controller.signal });
         if (controller.signal.aborted) return null;
         setPendingLayout(layout);
+        setRecommendedProductIds(collectRecommendedProductIds(layout));
         pushToast(`AI ready: ${layout.scenario}`, 'success');
         return layout;
       } catch (err) {
@@ -1084,6 +1125,7 @@ export function SceneStoreProvider({
     const ops = pendingLayout.operations;
     const budget = pendingLayout.constraints.budget ?? targetBudget;
     const scenario = pendingLayout.scenario;
+    setRecommendedProductIds(collectRecommendedProductIds(pendingLayout));
     setPendingLayout(null);
     await commitOps(ops, {
       animate: true,
@@ -1296,6 +1338,7 @@ export function SceneStoreProvider({
             objectType: item.category || item.name,
             productId: item.productId,
             assetId: item.assetId,
+            modelUrl: item.modelUrl,
             source: 'catalog',
             targetPosition: [0, y, 0],
             dimensions: dims,
@@ -1471,6 +1514,9 @@ export function SceneStoreProvider({
     voice,
     drawMode,
     strokes,
+    drawColor,
+    setDrawColor,
+    recommendedProductIds,
     intentModalOpen,
     intentIdeas,
     intentDraft,

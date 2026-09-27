@@ -16,7 +16,9 @@ export const demoScene = {
         scale: [1, 1, 1]
       },
       dimensions: { width: 2.1, height: 0.82, depth: 0.91 },
-      productId: 'product_sofa_01'
+      productId: 'product_sofa_01',
+      modelUrl: '/models/sofa.glb',
+      assetId: 'asset_sofa_01'
     },
     {
       id: 'lamp_17',
@@ -25,6 +27,7 @@ export const demoScene = {
       movable: true,
       assetId: 'asset_lamp_12',
       productId: 'product_39',
+      modelUrl: '/models/lampRoundFloor.glb',
       transform: {
         position: [-1.62, 0.86, 2.1],
         rotation: [0, 0, 0, 1],
@@ -38,6 +41,8 @@ export const demoScene = {
       source: 'catalog',
       movable: true,
       productId: 'product_table_05',
+      modelUrl: '/models/table.glb',
+      assetId: 'asset_table_05',
       transform: {
         position: [1.5, 0.375, 0.2],
         rotation: [0, 0, 0, 1],
@@ -63,7 +68,7 @@ export const demoScene = {
 };
 
 /** ~18 curated items — purchasable vs virtualOnly for commerce sandbox. */
-export const demoCatalog = [
+const demoCatalogBase = [
   {
     productId: 'product_sofa_01',
     name: 'Lounge Sofa',
@@ -71,6 +76,7 @@ export const demoCatalog = [
     currency: 'USD',
     dimensions: { width: 2.1, height: 0.82, depth: 0.91 },
     assetId: 'asset_sofa_01',
+    modelUrl: '/models/sofa.glb',
     tags: ['seating', 'living'],
     purchasable: true,
     virtualOnly: false,
@@ -85,6 +91,7 @@ export const demoCatalog = [
     currency: 'USD',
     dimensions: { width: 0.48, height: 0.86, depth: 0.52 },
     assetId: 'asset_chair_fold_01',
+    modelUrl: '/models/loungeChair.glb',
     tags: ['seating', 'party'],
     purchasable: true,
     virtualOnly: false,
@@ -99,6 +106,7 @@ export const demoCatalog = [
     currency: 'USD',
     dimensions: { width: 0.46, height: 0.92, depth: 0.5 },
     assetId: 'asset_chair_dining_02',
+    modelUrl: '/models/chairDesk.glb',
     tags: ['seating', 'dining'],
     purchasable: true,
     virtualOnly: false,
@@ -113,6 +121,7 @@ export const demoCatalog = [
     currency: 'USD',
     dimensions: { width: 0.4, height: 1.05, depth: 0.4 },
     assetId: 'asset_stool_bar_01',
+    modelUrl: '/models/stool.glb',
     tags: ['seating', 'party'],
     purchasable: true,
     virtualOnly: false,
@@ -127,6 +136,7 @@ export const demoCatalog = [
     currency: 'USD',
     dimensions: { width: 0.9, height: 0.7, depth: 0.9 },
     assetId: 'asset_beanbag_01',
+    modelUrl: '/models/beanbag.glb',
     tags: ['seating', 'movie', 'party'],
     purchasable: true,
     virtualOnly: false,
@@ -141,6 +151,7 @@ export const demoCatalog = [
     currency: 'USD',
     dimensions: { width: 1.4, height: 0.75, depth: 1.1 },
     assetId: 'asset_table_05',
+    modelUrl: '/models/table.glb',
     tags: ['table', 'living'],
     purchasable: true,
     virtualOnly: false,
@@ -155,6 +166,7 @@ export const demoCatalog = [
     currency: 'USD',
     dimensions: { width: 1.2, height: 0.75, depth: 0.6 },
     assetId: 'asset_desk_study_01',
+    modelUrl: '/models/desk.glb',
     tags: ['desk', 'study', 'table'],
     purchasable: true,
     virtualOnly: false,
@@ -169,6 +181,7 @@ export const demoCatalog = [
     currency: 'USD',
     dimensions: { width: 1.8, height: 0.75, depth: 0.9 },
     assetId: 'asset_table_dining_01',
+    modelUrl: '/models/sideTable.glb',
     tags: ['table', 'dining'],
     purchasable: true,
     virtualOnly: false,
@@ -183,6 +196,7 @@ export const demoCatalog = [
     currency: 'USD',
     dimensions: { width: 0.4, height: 1.72, depth: 0.4 },
     assetId: 'asset_lamp_12',
+    modelUrl: '/models/lampRoundFloor.glb',
     tags: ['lighting'],
     purchasable: true,
     virtualOnly: false,
@@ -197,6 +211,7 @@ export const demoCatalog = [
     currency: 'USD',
     dimensions: { width: 3.0, height: 0.05, depth: 0.05 },
     assetId: 'asset_party_lights_03',
+    modelUrl: '/models/string_lights.glb',
     tags: ['party', 'lighting'],
     purchasable: true,
     virtualOnly: false,
@@ -211,6 +226,7 @@ export const demoCatalog = [
     currency: 'USD',
     dimensions: { width: 0.2, height: 0.45, depth: 0.2 },
     assetId: 'asset_lamp_desk_01',
+    modelUrl: '/models/lampSquareTable.glb',
     tags: ['lighting', 'study'],
     purchasable: true,
     virtualOnly: false,
@@ -225,6 +241,7 @@ export const demoCatalog = [
     currency: 'USD',
     dimensions: { width: 0.45, height: 0.35, depth: 0.45 },
     assetId: 'asset_pendant_dinner_01',
+    modelUrl: '/models/pendant.glb',
     tags: ['lighting', 'dining'],
     purchasable: true,
     virtualOnly: false,
@@ -239,6 +256,7 @@ export const demoCatalog = [
     currency: 'USD',
     dimensions: { width: 2.0, height: 2.4, depth: 0.08 },
     assetId: 'asset_backdrop_12',
+    modelUrl: '/models/backdrop.glb',
     tags: ['party', 'decor', 'movie'],
     purchasable: true,
     virtualOnly: false,
@@ -253,6 +271,7 @@ export const demoCatalog = [
     currency: 'USD',
     dimensions: { width: 0.45, height: 1.4, depth: 0.45 },
     assetId: 'asset_plant_tall_02',
+    modelUrl: '/models/pottedPlant.glb',
     tags: ['decor'],
     purchasable: true,
     virtualOnly: false,
@@ -267,6 +286,7 @@ export const demoCatalog = [
     currency: 'USD',
     dimensions: { width: 2.0, height: 0.02, depth: 2.0 },
     assetId: 'asset_rug_party_01',
+    modelUrl: '/models/rugRectangle.glb',
     tags: ['party', 'floor'],
     purchasable: true,
     virtualOnly: false,
@@ -281,6 +301,7 @@ export const demoCatalog = [
     currency: 'USD',
     dimensions: { width: 2.4, height: 1.5, depth: 0.06 },
     assetId: 'asset_projector_screen_01',
+    modelUrl: '/models/projector_screen.glb',
     tags: ['movie', 'decor'],
     purchasable: true,
     virtualOnly: false,
@@ -317,3 +338,27 @@ export const demoCatalog = [
     category: 'virtual'
   }
 ];
+
+function retailerUrl(productId: string, name: string): string | undefined {
+  if (productId.startsWith('virtual_')) return undefined;
+  const slug = name.toLowerCase().replace(/ /g, '-');
+  const ikeaIds = new Set([
+    'desk_study_01',
+    'table_dining_01',
+    'plant_tall_02',
+    'lamp_desk_01'
+  ]);
+  if (ikeaIds.has(productId)) {
+    return `https://www.ikea.com/us/en/p/${slug}-${productId}/`;
+  }
+  return `https://www.amazon.com/s?k=${slug.replace(/-/g, '+')}`;
+}
+
+/** Curated demo catalog with retailer productUrl / websiteUrl for Shop. */
+export const demoCatalog = demoCatalogBase.map((item) => {
+  const productUrl = retailerUrl(item.productId, item.name);
+  return productUrl
+    ? { ...item, productUrl, websiteUrl: productUrl }
+    : item;
+});
+

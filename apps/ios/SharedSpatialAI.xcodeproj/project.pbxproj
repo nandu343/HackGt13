@@ -20,6 +20,7 @@
 		B1000B /* AROverlayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1000B /* AROverlayView.swift */; };
 		B10016 /* CameraRoomScanView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10016 /* CameraRoomScanView.swift */; };
 		B10017 /* CameraScanExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10017 /* CameraScanExporter.swift */; };
+		B10018 /* FurnitureMeshBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10018 /* FurnitureMeshBuilder.swift */; };
 		B1000C /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = F1000C /* Assets.xcassets */; };
 		B1000D /* RoomPlan.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F1000D /* RoomPlan.framework */; };
 		B1000E /* RealityKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F1000E /* RealityKit.framework */; };
@@ -29,6 +30,7 @@
 		B10013 /* PlanRoomSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10013 /* PlanRoomSheet.swift */; };
 		B10014 /* InviteSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10014 /* InviteSheet.swift */; };
 		B10015 /* SceneWebSocket.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10015 /* SceneWebSocket.swift */; };
+		B10019 /* CatalogPickerSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10019 /* CatalogPickerSheet.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -45,6 +47,7 @@
 		F1000B /* AROverlayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AROverlayView.swift; sourceTree = "<group>"; };
 		F10016 /* CameraRoomScanView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraRoomScanView.swift; sourceTree = "<group>"; };
 		F10017 /* CameraScanExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraScanExporter.swift; sourceTree = "<group>"; };
+		F10018 /* FurnitureMeshBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FurnitureMeshBuilder.swift; sourceTree = "<group>"; };
 		F1000C /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		F1000D /* RoomPlan.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = RoomPlan.framework; path = System/Library/Frameworks/RoomPlan.framework; sourceTree = SDKROOT; };
 		F1000E /* RealityKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = RealityKit.framework; path = System/Library/Frameworks/RealityKit.framework; sourceTree = SDKROOT; };
@@ -55,6 +58,7 @@
 		F10013 /* PlanRoomSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanRoomSheet.swift; sourceTree = "<group>"; };
 		F10014 /* InviteSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InviteSheet.swift; sourceTree = "<group>"; };
 		F10015 /* SceneWebSocket.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneWebSocket.swift; sourceTree = "<group>"; };
+		F10019 /* CatalogPickerSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CatalogPickerSheet.swift; sourceTree = "<group>"; };
 		P10001 /* SharedSpatialAI.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SharedSpatialAI.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -133,6 +137,7 @@
 				F10009 /* CaptureFlowView.swift */,
 				F10013 /* PlanRoomSheet.swift */,
 				F10014 /* InviteSheet.swift */,
+				F10019 /* CatalogPickerSheet.swift */,
 			);
 			path = RoomPlan;
 			sourceTree = "<group>";
@@ -149,6 +154,7 @@
 			isa = PBXGroup;
 			children = (
 				F1000B /* AROverlayView.swift */,
+				F10018 /* FurnitureMeshBuilder.swift */,
 				F10016 /* CameraRoomScanView.swift */,
 				F10017 /* CameraScanExporter.swift */,
 			);
@@ -264,8 +270,10 @@
 				B10009 /* CaptureFlowView.swift in Sources */,
 				B10013 /* PlanRoomSheet.swift in Sources */,
 				B10014 /* InviteSheet.swift in Sources */,
+				B10019 /* CatalogPickerSheet.swift in Sources */,
 				B1000A /* SceneViewerView.swift in Sources */,
 				B1000B /* AROverlayView.swift in Sources */,
+				B10018 /* FurnitureMeshBuilder.swift in Sources */,
 				B10016 /* CameraRoomScanView.swift in Sources */,
 				B10017 /* CameraScanExporter.swift in Sources */,
 				B10012 /* LayoutModels.swift in Sources */,
